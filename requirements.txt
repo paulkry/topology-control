@@ -1,0 +1,5 @@
+meshio==5.3.5
+polyscope==2.4.0
+torch==2.7.0
+numpy~=2.2.4
+libigl~=2.5.4.dev0
