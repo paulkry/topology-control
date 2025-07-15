@@ -1,3 +1,7 @@
+'''
+ Organize the pipeline for the machine learning workflow, including data processing, model architecture management, training, and evaluation.
+'''
+
 from src.CDataProcessor import CDataProcessor
 from src.CModelTrainer import CModelTrainer
 from src.CEvaluator import CEvaluator
