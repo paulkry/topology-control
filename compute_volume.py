@@ -2,15 +2,16 @@ import igl
 import polyscope as ps
 import numpy as np
 import meshio as meshio
-
 import numpy as np
 import trimesh
-
 import torch
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_volume_coords(resolution = 50):
-    """Get 3-dimensional vector (M, N, P) according to the desired resolutions."""
+    """Get 3-dimensional vector (M, N, P) according to the desired resolutions
+    on the [-1, 1]^3 cube"""
     # Define grid
     grid_values = torch.arange(-1, 1, float(1/resolution)).to(device) # e.g. 50 resolution -> 1/50 
     grid = torch.meshgrid(grid_values, grid_values, grid_values)
@@ -24,8 +25,8 @@ def get_volume_coords(resolution = 50):
 
 
 def predict_sdf(latent, coords, model):
-
-    # return np.linalg.norm(coords, axis=1) - 1
+    # remove the line below for NN parametrized sdf
+    return model(coords)
 
     sdf = torch.tensor([], dtype=torch.float32).view(1, 0).to(device)
 
@@ -42,17 +43,24 @@ def predict_sdf(latent, coords, model):
 
     return sdf
 
+"""
+This is the main function that takes a latent_code
+and a potentially NN-parametrized SDF
+to output the volume of the corresponding surface. 
+We are hoping to use it to generate data for
+the classifier (regressor) we will be training.
+"""
 
-def compute_volume(latent_code, model, grid_size): 
+def compute_volume(latent_code, model): 
     """
     Reconstruct the object from the latent code and visualize it.
     """
-    coords, grid_size_axis = get_volume_coords(50)
+    coords, grid_size = get_volume_coords(resolution=50)
     sdf = predict_sdf(latent_code, coords, model).flatten()
 
-    vertices, faces, _ = igl.marching_cubes(np.array(sdf.to("cpu")), np.array(coords.to("cpu")), grid_size, grid_size, grid_size, 0.0)
+    vertices, faces, _ = igl.marching_cubes(sdf.cpu().numpy(), coords.cpu().numpy(), grid_size, grid_size, grid_size, 0.0)
 
-    volume = triangle_mesh_to_volume(vertices, faces)
+    volume, _ = triangle_mesh_to_volume(vertices, faces)
     
     return volume
 
@@ -84,28 +92,40 @@ def triangle_mesh_to_volume(vertices, faces):
         
     return volume, is_closed
 
+
+def shallow_sdf(query_points):
+    radius = 0.5
+    dist = torch.linalg.norm(query_points, axis=1)
+    return dist - radius
+
 # Example usage
 if __name__ == "__main__":
     # Example 1: Create a simple cube mesh
-    vertices = np.array([
-        [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]
-    ])
+    # vertices = np.array([
+    #     [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0],
+    #     [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]
+    # ])
     
-    faces = np.array([
-        [0, 1, 2], [0, 2, 3], [4, 7, 6], [4, 6, 5],
-        [0, 4, 5], [0, 5, 1], [2, 6, 7], [2, 7, 3],
-        [0, 3, 7], [0, 7, 4], [1, 5, 6], [1, 6, 2]
-    ])
-    
+    # faces = np.array([
+    #     [0, 1, 2], [0, 2, 3], [4, 7, 6], [4, 6, 5],
+    #     [0, 4, 5], [0, 5, 1], [2, 6, 7], [2, 7, 3],
+    #     [0, 3, 7], [0, 7, 4], [1, 5, 6], [1, 6, 2]
+    # ])
+
     # Calculate volume
-    volume, is_closed = triangle_mesh_to_volume(vertices, faces)
+    # volume, is_closed = triangle_mesh_to_volume(vertices, faces)
+    
+    # print(f"Volume: {volume:.6f}")
+    # print(f"Is closed: {is_closed}")
+    # print(f"Expected volume (unit cube): 1.0")
+
+    #---------------------------------------------------------------
+
+    # Example 2: With a shallow SDF :)
+    # Calculate volume
+    radius = 0.5
+    volume = compute_volume(None, shallow_sdf)
     
     print(f"Volume: {volume:.6f}")
-    print(f"Is closed: {is_closed}")
-    print(f"Expected volume (unit cube): 1.0")
+    print(f"Expected volume (a sphere): {np.pi * 4 / 3 * radius ** 3}")
     
-    # Example 2: Load from OBJ file (uncomment if you have an OBJ file)
-    # vertices, faces = load_obj_file("your_mesh.obj")
-    # result = triangle_mesh_to_volume(vertices, faces, method='pytetgen')
-    # save_results(result, "volume_results.txt")
