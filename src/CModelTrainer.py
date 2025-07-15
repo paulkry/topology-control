@@ -1,20 +1,18 @@
 """
    [To be Completed] Classifier training pipeline
 """
-class CModelTrainer:   
-    def __init__(self, functions, loss_fn, x, lr, log_freq=100, verbose=False):
-        """
-        Initialize the trainer with a list of functions, a loss function, and an initial parameter value
-        
-        Parameters:
-            To be Defined
-        """
-        self.functions = functions
-        self.loss_fn = loss_fn
-        self.optimizer = None
-        self.log_freq = log_freq
-        self.verbose = verbose
+import torch
 
-    def train(self, target, epochs=1000):
+class CModelTrainer:
+    def __init__(self, config, device=None):
+        self.config = config
+        self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
-        return None
+        # Training parameters
+        self.epochs = config.get('epochs', 100)
+        self.batch_size = config.get('batch_size', 1024)
+        self.learning_rate = config.get('learning_rate', 1e-3)
+
+    def train_and_validate(self, model):
+        pass
+
