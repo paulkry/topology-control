@@ -1,0 +1,23 @@
+home: &home_path /home/sei/tetrahedron_pair_ML # all other paths are relative to home
+
+artifacts_config:
+  save_artifacts_to: artifacts 
+
+processor_config:
+  skip_processing: true
+  processed_data_path: data/processed
+  # Specify configs
+
+model_config:
+  skip_building: true
+  processed_data_path: *processed_data_path
+  # Specify configs
+  
+trainer_config:
+  skip_training: true
+  processed_data_path: data/processed
+  # Specify configs
+  
+evaluator_config:
+  skip_evaluation: true
+  # Specify configs

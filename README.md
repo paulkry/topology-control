@@ -13,7 +13,7 @@ Some requirement may be missing (pip freeze gave me many local packages that I r
 
 	python -m pip install -r requirements.txt
 
-Wishlist here... to figure out what goes in the requjirements with a pip -freeze (i.e., wiht version numbers)
+Wishlist here... to figure out what goes in the requirements with a pip -freeze (i.e., wiht version numbers)
 
 polyscope
 meshio
