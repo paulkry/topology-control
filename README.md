@@ -1,5 +1,5 @@
 # topology-control
-MMIT SGI 2025 topology control project
+MIT SGI 2025 topology control project
 
 All of this works at least with python 3.10:
 
