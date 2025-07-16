@@ -8,7 +8,7 @@ import os
 
 ps.init()
 
-meshes = ["data/raw/bunny.obj"]#, "data/raw/bimba.obj", "data/raw/torus.obj"]
+meshes = [ "data/raw/bimba.obj", "data/raw/torus.obj"]
 
 for mesh_file in meshes:
 	# load the mesh
