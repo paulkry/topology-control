@@ -4,9 +4,16 @@ artifacts_config:
   save_artifacts_to: artifacts 
 
 processor_config:
-  skip_processing: true
-  processed_data_path: data/processed
-  # Specify configs
+  dataset_paths:
+    raw: &raw_data_path data/raw 
+    processed: &processed_data_path data/processed 
+
+  train_val_split: 0.8
+  point_cloud_params:
+    radius: 0.02
+    sigma: 0.01
+    n_gaussian: 5
+    n_uniform: 1000
 
 model_config:
   skip_building: true
