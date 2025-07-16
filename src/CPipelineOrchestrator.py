@@ -31,6 +31,38 @@ class CPipelineOrchestrator:
         self.evaluator = CEvaluator(self.config["evaluator_config"], self.config["processor_config"])
         self.artifact_manager = CArtifactManager(self.config["artifacts_config"])
 
+
+    def run(self):
+        """Execute the complete ML pipeline: Data → Model → Training → Evaluation."""
+        pipeline_state = {}
+        
+        try:
+            self._log_experiment_start()
+            
+            # Step 1: Data Processing
+            self._current_step = 'data_processing'
+            self._process_data_step(pipeline_state)
+            
+            # Step 2: Model Building
+            self._current_step = 'model_building'
+            self._build_model_step(pipeline_state)
+            
+            # Step 3: Training (or Loading)
+            self._current_step = 'training'
+            self._train_model_step(pipeline_state)
+            
+            # Step 4: Evaluation
+            self._current_step = 'evaluation'
+            self._evaluate_model_step(pipeline_state)
+            
+            # Save final summary
+            self._save_pipeline_summary(pipeline_state)
+            print("\n=== Pipeline Completed Successfully ===")
+            
+        except Exception as e:
+            self._handle_pipeline_error(e)
+            raise
+
     def _load_config(self, config_file):
         with open(config_file, "r") as file:
             print("- Configuration Loaded -")
@@ -69,38 +101,6 @@ class CPipelineOrchestrator:
         dataset_paths = processor.get('dataset_paths', {})
         for key, value in dataset_paths.items():
             dataset_paths[key] = join_with_home(value)
-
-
-    def run(self):
-        """Execute the complete ML pipeline: Data → Model → Training → Evaluation."""
-        pipeline_state = {}
-        
-        try:
-            self._log_experiment_start()
-            
-            # Step 1: Data Processing
-            self._current_step = 'data_processing'
-            self._process_data_step(pipeline_state)
-            
-            # Step 2: Model Building
-            self._current_step = 'model_building'
-            self._build_model_step(pipeline_state)
-            
-            # Step 3: Training (or Loading)
-            self._current_step = 'training'
-            self._train_model_step(pipeline_state)
-            
-            # Step 4: Evaluation
-            self._current_step = 'evaluation'
-            self._evaluate_model_step(pipeline_state)
-            
-            # Save final summary
-            self._save_pipeline_summary(pipeline_state)
-            print("\n=== Pipeline Completed Successfully ===")
-            
-        except Exception as e:
-            self._handle_pipeline_error(e)
-            raise
 
     def _log_experiment_start(self):
         """Log experiment information."""
