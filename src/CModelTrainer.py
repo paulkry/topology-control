@@ -165,6 +165,7 @@ class CModelTrainer:
         # Training history
         history = []
         best_val_loss = float('inf')
+        best_model_state = None
         
         # Training loop
         for epoch in range(self.epochs):
@@ -187,6 +188,8 @@ class CModelTrainer:
             # Track best model
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                # Save best model state
+                best_model_state = model.state_dict().copy()
             
             # Record history
             epoch_data = {
@@ -202,6 +205,11 @@ class CModelTrainer:
                   f"Train Loss: {train_loss:.6f}, "
                   f"Val Loss: {val_loss:.6f}, "
                   f"Time: {epoch_time:.2f}s")
+        
+        # Load best model state
+        if best_model_state is not None:
+            model.load_state_dict(best_model_state)
+            print(f"Loaded best model (validation loss: {best_val_loss:.6f})")
         
         # Create training report
         report = self._create_report(history, best_val_loss)
@@ -315,4 +323,3 @@ class CModelTrainer:
         except Exception as e:
             print(f"Warning: Could not create loss plot: {e}")
             return None
-     
