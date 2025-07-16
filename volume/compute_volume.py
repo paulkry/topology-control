@@ -5,6 +5,7 @@ import meshio as meshio
 import numpy as np
 import trimesh
 import torch
+import os
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -91,6 +92,20 @@ def triangle_mesh_to_volume(vertices, faces):
     volume = abs(mesh.volume)
         
     return volume, is_closed
+
+def generate_latent_volume_data(n, model, latent_dim, latent_sd, latent_mean):
+    latents = torch.randn(n, latent_dim)
+    latents = (latents * latent_sd) + latent_mean
+    data_dir = "data/processed/train"
+
+    volumes = []
+
+    for latent in latents:
+        volumes.append(compute_volume(latent, model))
+
+    np.savez(os.path.join(data_dir, "volume_labeling"),
+                 latents=latents.astype(np.float32),
+                 volumes=volumes.astype(np.float32))
 
 
 def shallow_sdf(query_points):
