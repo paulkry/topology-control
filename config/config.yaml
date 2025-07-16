@@ -4,6 +4,7 @@ artifacts_config:
   save_artifacts_to: artifacts 
 
 processor_config:
+  skip_processing: true
   dataset_paths:
     raw: &raw_data_path data/raw 
     processed: &processed_data_path data/processed 
@@ -17,12 +18,11 @@ processor_config:
 
 model_config:
   skip_building: true
-  processed_data_path: *processed_data_path
   # Specify configs
   
 trainer_config:
   skip_training: true
-  processed_data_path: data/processed
+  processed_data_path: *processed_data_path
   # Specify configs
   
 evaluator_config:
