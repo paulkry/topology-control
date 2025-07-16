@@ -2,8 +2,9 @@
 Artifact Management for Topology Control Pipeline
 """
 import os
-import json
 import datetime
+import json
+import base64
 from pathlib import Path
 
 class CArtifactManager:
@@ -48,7 +49,7 @@ class CArtifactManager:
 
     def save_artifacts(self, **artifacts):
         """
-        Save multiple artifacts as text files.
+        Save multiple artifacts (text files and images).
         
         Parameters:
             **artifacts: Key-value pairs where key is the artifact name and value is the data
@@ -56,14 +57,84 @@ class CArtifactManager:
         saved_files = []
         
         for artifact_name, artifact_data in artifacts.items():
-            try:
+            # Check if this artifact contains base64 image data
+            if self._is_base64_image(artifact_name, artifact_data):
+                filename = self._save_image_artifact(artifact_name, artifact_data)
+                if filename:
+                    saved_files.append(filename)
+            elif isinstance(artifact_data, dict):
+                # For dictionary artifacts, check each key for potential images
+                images_extracted = []
+                for key, value in artifact_data.items():
+                    if self._is_base64_image(key, value):
+                        # Save image separately
+                        image_filename = self._save_image_artifact(f"{artifact_name}_{key}", value)
+                        if image_filename:
+                            saved_files.append(image_filename)
+                            images_extracted.append(key)
+                
+                # Save the main artifact (text) with images removed
                 filename = self._save_single_artifact(artifact_name, artifact_data)
-                saved_files.append(filename)
-                print(f"  📄 Saved: {filename}")
-            except Exception as e:
-                print(f"  ❌ Failed to save {artifact_name}: {e}")
+                if filename:
+                    saved_files.append(filename)
+            else:
+                filename = self._save_single_artifact(artifact_name, artifact_data)
+                if filename:
+                    saved_files.append(filename)
         
         return saved_files
+
+    def _is_base64_image(self, name, data):
+        """
+        Check if the data is a base64 encoded image.
+        
+        Parameters:
+            name (str): Name of the artifact
+            data: Data to check
+            
+        Returns:
+            bool: True if data appears to be base64 image data
+        """
+        # Check if it's a plot or image artifact with base64 string data
+        if isinstance(data, str) and ('plot' in name.lower() or 'image' in name.lower()):
+            try:
+                # Try to decode as base64 - if successful and reasonable length, it's likely an image
+                decoded = base64.b64decode(data)
+                return len(decoded) > 100  # Reasonable minimum size for an image
+            except Exception:
+                return False
+        return False
+
+    def _save_image_artifact(self, name, base64_data):
+        """
+        Save a base64 encoded image as a PNG file.
+        
+        Parameters:
+            name (str): Name of the artifact
+            base64_data (str): Base64 encoded image data
+            
+        Returns:
+            str: Filename of the saved image
+        """
+        try:
+            # Create safe filename
+            safe_name = self._sanitize_filename(name)
+            filename = f"{safe_name}.png"
+            filepath = os.path.join(self.experiment_path, filename)
+            
+            # Decode base64 and save as PNG
+            image_data = base64.b64decode(base64_data)
+            
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            
+            print(f"  🖼️ Saved image: {filename}")
+            return filename
+            
+        except Exception as e:
+            print(f"  ❌ Failed to save image {name}: {e}")
+            # Fallback to text file
+            return self._save_single_artifact(name, f"Base64 image data (failed to decode): {str(e)}")
 
     def _save_single_artifact(self, name, data):
         """
@@ -88,6 +159,7 @@ class CArtifactManager:
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(text_content)
         
+        print(f"  📄 Saved artifact: {filename}")
         return filename
 
     def _convert_to_text(self, name, data):
@@ -109,7 +181,9 @@ class CArtifactManager:
         try:
             # Handle different data types
             if isinstance(data, dict):
-                content = json.dumps(data, indent=2, default=str)
+                # Exclude base64 image data from text representation
+                filtered_data = {k: v for k, v in data.items() if not self._is_base64_image(k, v)}
+                content = json.dumps(filtered_data, indent=2, default=str)
             elif isinstance(data, (list, tuple)):
                 content = "\n".join(str(item) for item in data)
             elif hasattr(data, '__dict__'):  # Objects with attributes
@@ -176,6 +250,37 @@ class CArtifactManager:
         print(f"  📄 Saved text file: {safe_filename}")
         return filepath
 
+    def save_image_file(self, filename, base64_data):
+        """
+        Save base64 encoded image data to a PNG file.
+        
+        Parameters:
+            filename (str): Name of the file (without extension)
+            base64_data (str): Base64 encoded image data
+            
+        Returns:
+            str: Full path to the saved file
+        """
+        safe_filename = self._sanitize_filename(filename)
+        if not safe_filename.endswith('.png'):
+            safe_filename += '.png'
+        
+        filepath = os.path.join(self.experiment_path, safe_filename)
+        
+        try:
+            # Decode base64 and save as PNG
+            image_data = base64.b64decode(base64_data)
+            
+            with open(filepath, 'wb') as f:
+                f.write(image_data)
+            
+            print(f"  🖼️ Saved image file: {safe_filename}")
+            return filepath
+            
+        except Exception as e:
+            print(f"  ❌ Failed to save image {filename}: {e}")
+            return None
+
     def list_artifacts(self):
         """
         List all artifacts saved in the current experiment.
@@ -209,3 +314,102 @@ class CArtifactManager:
             safe_name += '.txt'
         
         return os.path.join(self.experiment_path, safe_name)
+
+    def save_model(self, model, name="model", metadata=None):
+        """
+        Save a PyTorch model as a .pt file.
+        
+        Parameters:
+            model: PyTorch model to save
+            name (str): Name for the model file (without extension)
+            metadata (dict): Optional metadata about the model (validation loss, etc.)
+            
+        Returns:
+            str: Full path to the saved model file
+        """
+        try:
+            import torch
+            
+            # Generate filename with timestamp and metadata
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Add metadata to filename if provided
+            if metadata and 'best_val_loss' in metadata:
+                val_loss = metadata['best_val_loss']
+                filename = f"{name}_{timestamp}_val{val_loss:.6f}.pt"
+            else:
+                filename = f"{name}_{timestamp}.pt"
+            
+            # Sanitize filename
+            safe_filename = self._sanitize_filename(filename.replace('.pt', '')) + '.pt'
+            filepath = os.path.join(self.experiment_path, safe_filename)
+            
+            # Save model state dict
+            torch.save(model.state_dict(), filepath)
+            print(f"  💾 Model saved: {safe_filename}")
+            
+            # Save model metadata if provided
+            if metadata:
+                metadata_filename = safe_filename.replace('.pt', '_metadata.txt')
+                self._save_single_artifact(metadata_filename.replace('.txt', ''), metadata)
+            
+            return filepath
+            
+        except Exception as e:
+            print(f"  ❌ Failed to save model {name}: {e}")
+            return None
+    
+    def load_model(self, model, model_path, device=None):
+        """
+        Load a PyTorch model from a .pt file.
+        
+        Parameters:
+            model: PyTorch model architecture (must match saved model)
+            model_path (str): Path to the .pt file (can be absolute or relative to experiment path)
+            device: PyTorch device to load model to
+            
+        Returns:
+            model: Loaded model
+        """
+        try:
+            import torch
+            
+            # Handle relative paths
+            if not os.path.isabs(model_path):
+                model_path = os.path.join(self.experiment_path, model_path)
+            
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model file not found: {model_path}")
+            
+            # Determine device
+            if device is None:
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            
+            # Load model state dict
+            state_dict = torch.load(model_path, map_location=device)
+            model.load_state_dict(state_dict)
+            model = model.to(device)
+            
+            print(f"  📁 Model loaded from: {os.path.basename(model_path)}")
+            return model
+            
+        except Exception as e:
+            print(f"  ❌ Failed to load model: {e}")
+            raise
+    
+    def list_models(self):
+        """
+        List all saved model files in the current experiment.
+        
+        Returns:
+            list: List of model filenames (.pt files)
+        """
+        if not os.path.exists(self.experiment_path):
+            return []
+        
+        models = []
+        for file in os.listdir(self.experiment_path):
+            if file.endswith('.pt') and os.path.isfile(os.path.join(self.experiment_path, file)):
+                models.append(file)
+        
+        return sorted(models)
