@@ -1,159 +1,12 @@
 """
 Data Processing for Topology Control
 """
-import torch
 import os
 import numpy as np
 import meshio as meshio
 import igl
-import polyscope as ps
-from pathlib import Path
-from torch.utils.data import Dataset
-
-class PointCloudProcessor:
-    """Pipeline for generating point clouds from meshes"""
-    
-    def __init__(self, data_dir="data"):
-        self.data_dir = data_dir
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-    
-    def load_mesh(self, mesh_file):
-        """Load and normalize mesh"""
-        mesh = meshio.read(mesh_file)
-        vertices = mesh.points.copy()
-        # Rescale vertices to fit in the -1 to 1 cube
-        vertices -= np.mean(vertices, axis=0)	
-        vertices /= np.max(np.abs(vertices))
-        faces = mesh.cells[0].data
-        name = Path(mesh_file).stem
-        return vertices, faces, name
-    
-    def sample_points(self, vertices, faces, radius=0.02, sigma=0.0, mu=0.0, n_gaussian=10, n_uniform=1000):
-        """ 
-        Sample points using different strategies
-        Input: 
-            - vertices: Mesh vertices
-            - faces: Mesh faces
-            - radius: Radius for blue noise sampling
-            - sigma: Standard deviation for Gaussian noise
-            - mu: Mean for Gaussian noise
-            - n_gaussian: Number of sampled points to add Gaussian Noise
-            - n_uniform: Number of uniform random samples
-        
-        Output:
-            - sampled_points: Array of sampled points
-        """
-        # Sample random points in the -1 to 1 cube
-        random_points = np.random.uniform(-1, 1, (n_uniform, 3))
-        # Compute surface points using blue noise
-        surface_points = igl.blue_noise(vertices, faces, radius)[2]
-        # Concatenate surface points with random points
-        sampled_points = np.concatenate((random_points, surface_points), axis=0)
-        
-        # Add Gaussian noise if needed
-        if n_gaussian > 0 and sigma > 0:
-            noise = np.random.normal(mu, sigma, (n_gaussian, surface_points.shape[0], 3))
-            for i in range(n_gaussian):
-                new_points = surface_points + noise[i]
-                sampled_points = np.concatenate((sampled_points, new_points), axis=0)
-        
-        return sampled_points
-
-    def generate_point_cloud(self, meshes, radius=0.02, sigma=0.0, mu=0.0, n_gaussian=10, n_uniform=1000):
-        """
-        Generate point clouds from meshes
-            Input:
-                - meshes: List of mesh file paths
-                - radius: Radius for blue noise sampling
-                - sigma: Standard deviation for Gaussian noise
-                - mu: Mean for Gaussian noise
-                - n_gaussian: Number of Gaussian noise samples
-                - n_uniform: Number of uniform random samples
-                
-            Output:
-                - Point cloud visualization using Polyscope
-        """
-        ps.init()
-        
-        for mesh_file in meshes:
-            vertices, faces, name = self.load_mesh(mesh_file)
-            
-            # Check if data already exists
-            points_file = f"{self.data_dir}/{name}_sampled_points.npy"
-            distances_file = f"{self.data_dir}/{name}_signed_distances.npy"
-            
-            # Load data
-            if os.path.exists(points_file) and os.path.exists(distances_file):
-                print(f"[Existing File] Loading data for {name}")
-                sampled_points = np.load(points_file)
-                distances = np.load(distances_file)
-            else:
-                print(f"[New File] Sampling points for {name}")
-                sampled_points = self.sample_points(vertices, faces, radius, sigma, mu, n_gaussian, n_uniform)
-                distances = igl.signed_distance(sampled_points, vertices, faces)[0]
-                
-                # Save data
-                np.save(points_file, sampled_points)
-                np.save(distances_file, distances)
-            
-            # Visualize on Polyscope
-            ps.register_surface_mesh(name, vertices, faces)
-            point_cloud = ps.register_point_cloud(f"{name}_points", sampled_points)
-            point_cloud.add_scalar_quantity("signed_distance", distances)
-        
-        ps.show()
-
-"""
-Dataset Class for training network
-mapping latent vectors to volumes
-"""
-class VolumeDataset(Dataset):
-
-    def __init__(self, dataset_path):
-        """
-            Expecting a npz file with two arrays:
-            latents and volumes
-        """
-        self.file_path = dataset_path
-        data = np.load(dataset_path)
-        self.latents = torch.tensor(data["latents"], dtype=torch.float64)
-        self.volumes = torch.tensor(data["volumes"], dtype=torch.float64)
-        self.size = self.latents.shape[0]
-
-    def __getitem__(self, idx):
-        return self.latents[idx], self.volumes[idx]
-
-    def collate_fn(self, batch):
-        latents, volumes = zip(*batch)
-        return torch.stack(latents), torch.stack(volumes)
-
-    def __len__(self):
-        return self.size
-
-
-def main():
-    """Example usage (of PointCloudProcessor)"""
-    # Get mesh paths (src and data are on the same level)
-    project_root = Path(__file__).parent.parent
-    data_dir = project_root/"data"
-    
-    meshes = [
-        str(data_dir/"raw"/"bunny.obj"),
-        str(data_dir/"raw"/"bimba.obj"),
-        str(data_dir/"raw"/"torus.obj")
-    ]
-    
-    # Generate point clouds
-    processor = PointCloudProcessor(data_dir=str(data_dir))
-    processor.generate_point_cloud(meshes, sigma=0.01, n_gaussian=5)
-
-
-if __name__ == "__main__":
-    main()
-
-
-            
+from src.CGeometryUtils import PointCloudProcessor
+  
 class CDataProcessor:
     def __init__(self, config):
         """
@@ -161,9 +14,9 @@ class CDataProcessor:
         
         Parameters:
             config (dict): Configuration parameters for data processing including:
-                - dataset_paths: dict with paths to raw data and processed data
+                - dataset_paths: dict with 'raw' and 'processed' paths (train/val auto-derived)
                 - point_cloud_params: dict with sampling parameters
-                - mesh_files: list of mesh file names to process
+                - train_val_split: float between 0 and 1 for train/validation split ratio
         """
         self.config = config
         
@@ -171,6 +24,13 @@ class CDataProcessor:
         dataset_paths = config.get('dataset_paths', {})
         self.raw_data_path = dataset_paths.get('raw', 'data/raw')
         self.processed_data_path = dataset_paths.get('processed', 'data/processed')
+        
+        # Automatically derive train and val paths from processed path
+        self.train_data_path = os.path.join(self.processed_data_path, 'train')
+        self.val_data_path = os.path.join(self.processed_data_path, 'val')
+        
+        # Extract train/val split ratio
+        self.train_val_split = config.get('train_val_split', 0.8)  # Default 80% train, 20% val
         
         # Extract point cloud processing parameters
         pc_params = config.get('point_cloud_params', {})
@@ -186,6 +46,86 @@ class CDataProcessor:
         # Initialize point cloud processor
         self.point_cloud_processor = PointCloudProcessor(data_dir=self.processed_data_path)
     
+    def process(self):
+        """
+        Main processing method that integrates with the pipeline.
+        Uses the PointCloudProcessor to generate point clouds and signed distances.
+        Splits processed files into train and val directories.
+        
+        Returns:
+            dict: Processing results including file paths and basic data statistics
+        """
+        print(f"Processing {len(self.mesh_files)} mesh files...")
+        
+        # Validate train_val_split
+        if not 0 < self.train_val_split < 1:
+            raise ValueError(f"train_val_split must be between 0 and 1, got {self.train_val_split}")
+        
+        # Build full paths to mesh files
+        mesh_paths = []
+        for mesh_file in self.mesh_files:
+            mesh_path = os.path.join(self.raw_data_path, mesh_file)
+            if os.path.exists(mesh_path):
+                mesh_paths.append(mesh_path)
+            else:
+                print(f"Warning: Mesh file not found: {mesh_path}")
+        
+        if not mesh_paths:
+            raise ValueError(f"No valid mesh files found in {self.raw_data_path}")
+        
+        # Create all necessary directories
+        for path in [self.processed_data_path, self.train_data_path, self.val_data_path]:
+            os.makedirs(path, exist_ok=True)
+        
+        # Determine train/val split
+        train_files, val_files = self._split_files(mesh_paths)
+        
+        # Process files and organize into train/val
+        processing_results = {
+            'processed_files': [],
+            'train_files': [],
+            'val_files': [],
+            'point_cloud_files': {'train': [], 'val': []},
+            'signed_distance_files': {'train': [], 'val': []},
+            'total_points_generated': 0,
+            'train_count': len(train_files),
+            'val_count': len(val_files),
+            'split_ratio': self.train_val_split,
+            'processing_params': {
+                'radius': self.radius,
+                'sigma': self.sigma,
+                'mu': self.mu,
+                'n_gaussian': self.n_gaussian,
+                'n_uniform': self.n_uniform
+            }
+        }
+        
+        # Process training files
+        print(f"Processing {len(train_files)} training files...")
+        for mesh_path in train_files:
+            result = self._process_single_mesh(mesh_path, 'train')
+            processing_results['processed_files'].append(result['mesh_name'])
+            processing_results['train_files'].append(result['mesh_name'])
+            processing_results['point_cloud_files']['train'].append(result['points_file'])
+            processing_results['signed_distance_files']['train'].append(result['distances_file'])
+            processing_results['total_points_generated'] += result['num_points']
+        
+        # Process validation files
+        print(f"Processing {len(val_files)} validation files...")
+        for mesh_path in val_files:
+            result = self._process_single_mesh(mesh_path, 'val')
+            processing_results['processed_files'].append(result['mesh_name'])
+            processing_results['val_files'].append(result['mesh_name'])
+            processing_results['point_cloud_files']['val'].append(result['points_file'])
+            processing_results['signed_distance_files']['val'].append(result['distances_file'])
+            processing_results['total_points_generated'] += result['num_points']
+        
+        print(f"Data processing complete.")
+        print(f"  Train: {processing_results['train_count']} files")
+        print(f"  Val: {processing_results['val_count']} files")
+        print(f"  Total points: {processing_results['total_points_generated']}")
+        return processing_results
+
     def _discover_mesh_files(self):
         """
         Discover all mesh files in the raw data directory.
@@ -211,62 +151,54 @@ class CDataProcessor:
         print(f"Discovered {len(mesh_files)} mesh files in {self.raw_data_path}: {mesh_files}")
         return mesh_files
 
-    def process(self):
+    def _split_files(self, mesh_paths):
         """
-        Main processing method that integrates with the pipeline.
-        Uses the PointCloudProcessor to generate point clouds and signed distances.
+        Split mesh files into train and validation sets.
         
+        Parameters:
+            mesh_paths (list): List of mesh file paths
+            
         Returns:
-            dict: Processing results including file paths and statistics
+            tuple: (train_files, val_files)
         """
-        print(f"Processing {len(self.mesh_files)} mesh files...")
+        import random
         
-        # Build full paths to mesh files
-        mesh_paths = []
-        for mesh_file in self.mesh_files:
-            mesh_path = os.path.join(self.raw_data_path, mesh_file)
-            if os.path.exists(mesh_path):
-                mesh_paths.append(mesh_path)
-            else:
-                print(f"Warning: Mesh file not found: {mesh_path}")
+        # Handle edge cases
+        if len(mesh_paths) == 0:
+            return [], []
+        elif len(mesh_paths) == 1:
+            # If only one file, put it in training
+            print("Warning: Only one file found, assigning to training set")
+            return mesh_paths, []
+        elif len(mesh_paths) == 2:
+            # If only two files, one in each set
+            print("Warning: Only two files found, one assigned to each set")
+            return [mesh_paths[0]], [mesh_paths[1]]
         
-        if not mesh_paths:
-            raise ValueError(f"No valid mesh files found in {self.raw_data_path}")
+        # For multiple files, use the split ratio
+        # Sort paths for reproducible splits
+        sorted_paths = sorted(mesh_paths)
         
-        # Create processed data directory if it doesn't exist
-        os.makedirs(self.processed_data_path, exist_ok=True)
+        # Calculate split index
+        train_count = max(1, int(len(sorted_paths) * self.train_val_split))
         
-        # Process each mesh file using the PointCloudProcessor approach
-        processing_results = {
-            'processed_files': [],
-            'point_cloud_files': [],
-            'signed_distance_files': [],
-            'total_points_generated': 0,
-            'processing_params': {
-                'radius': self.radius,
-                'sigma': self.sigma,
-                'mu': self.mu,
-                'n_gaussian': self.n_gaussian,
-                'n_uniform': self.n_uniform
-            }
-        }
+        # Ensure at least one file in validation if we have more than one file
+        if train_count >= len(sorted_paths):
+            train_count = len(sorted_paths) - 1
         
-        for mesh_path in mesh_paths:
-            result = self._process_single_mesh(mesh_path)
-            processing_results['processed_files'].append(result['mesh_name'])
-            processing_results['point_cloud_files'].append(result['points_file'])
-            processing_results['signed_distance_files'].append(result['distances_file'])
-            processing_results['total_points_generated'] += result['num_points']
+        train_files = sorted_paths[:train_count]
+        val_files = sorted_paths[train_count:]
         
-        print(f"Data processing complete. Generated {processing_results['total_points_generated']} total points.")
-        return processing_results
+        print(f"Split: {len(train_files)} train, {len(val_files)} val (ratio: {self.train_val_split:.2f})")
+        return train_files, val_files
     
-    def _process_single_mesh(self, mesh_path):
+    def _process_single_mesh(self, mesh_path, split='train'):
         """
         Process a single mesh file using the PointCloudProcessor logic.
         
         Parameters:
             mesh_path (str): Path to the mesh file
+            split (str): Either 'train' or 'val' to determine output directory
             
         Returns:
             dict: Results for this specific mesh
@@ -274,17 +206,25 @@ class CDataProcessor:
         # Load and normalize mesh using PointCloudProcessor method
         vertices, faces, name = self.point_cloud_processor.load_mesh(mesh_path)
         
-        # Define output file paths (following PointCloudProcessor naming convention)
-        points_file = os.path.join(self.processed_data_path, f"{name}_sampled_points.npy")
-        distances_file = os.path.join(self.processed_data_path, f"{name}_signed_distances.npy")
+        # Determine output directory based on split
+        if split == 'train':
+            output_dir = self.train_data_path
+        elif split == 'val':
+            output_dir = self.val_data_path
+        else:
+            raise ValueError(f"Invalid split: {split}. Must be 'train' or 'val'")
+        
+        # Define output file paths
+        points_file = os.path.join(output_dir, f"{name}_sampled_points.npy")
+        distances_file = os.path.join(output_dir, f"{name}_signed_distances.npy")
         
         # Check if data already exists (same logic as PointCloudProcessor)
         if os.path.exists(points_file) and os.path.exists(distances_file):
-            print(f"  [Existing File] Loading data for {name}")
+            print(f"  [{split.upper()}] [Existing File] Loading data for {name}")
             sampled_points = np.load(points_file)
             distances = np.load(distances_file)
         else:
-            print(f"  [New File] Sampling points for {name}")
+            print(f"  [{split.upper()}] [New File] Sampling points for {name}")
             # Sample points using PointCloudProcessor method with config parameters
             sampled_points = self.point_cloud_processor.sample_points(
                 vertices, faces, 
@@ -310,6 +250,7 @@ class CDataProcessor:
             'distances_file': distances_file,
             'num_points': len(sampled_points),
             'vertices': vertices,
-            'faces': faces
+            'faces': faces,
+            'split': split
         }
     

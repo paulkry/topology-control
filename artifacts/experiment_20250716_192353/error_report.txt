@@ -1,0 +1,10 @@
+Artifact: error_report
+Generated: 2025-07-16 19:23:53
+Experiment: 20250716_192353
+==================================================
+
+{
+  "error": "Training is skipped but no model_path specified in evaluator_config.",
+  "failed_step": "training",
+  "traceback": "Traceback (most recent call last):\n  File \"/home/sei/repo/topology-control/src/CPipelineOrchestrator.py\", line 52, in run\n    self._train_model_step(pipeline_state)\n  File \"/home/sei/repo/topology-control/src/CPipelineOrchestrator.py\", line 176, in _train_model_step\n    self._load_pretrained_model(state)\n  File \"/home/sei/repo/topology-control/src/CPipelineOrchestrator.py\", line 210, in _load_pretrained_model\n    raise ValueError(\"Training is skipped but no model_path specified in evaluator_config.\")\nValueError: Training is skipped but no model_path specified in evaluator_config.\n"
+}

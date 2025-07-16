@@ -1,0 +1,10 @@
+Artifact: model_architecture
+Generated: 2025-07-16 19:23:53
+Experiment: 20250716_192353
+==================================================
+
+{
+  "model_class": "SimpleMLP",
+  "total_parameters": 10881,
+  "trainable_parameters": 10881
+}
