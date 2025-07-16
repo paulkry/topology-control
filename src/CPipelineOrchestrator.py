@@ -51,9 +51,9 @@ class CPipelineOrchestrator:
             self._current_step = 'training'
             self._train_model_step(pipeline_state)
             
-            # Step 4: Evaluation
-            self._current_step = 'evaluation'
-            self._evaluate_model_step(pipeline_state)
+            # # Step 4: Evaluation
+            # self._current_step = 'evaluation'
+            # self._evaluate_model_step(pipeline_state)
             
             # Save final summary
             self._save_pipeline_summary(pipeline_state)
@@ -134,7 +134,7 @@ class CPipelineOrchestrator:
         
         print("🔄 Step 1: Processing Data...")
         processing_results = self.data_processor.process()
-        state["data"] = processing_results
+        state["processing_report"] = processing_results
         
         if processing_results:
             self.artifact_manager.save_artifacts(
@@ -144,7 +144,7 @@ class CPipelineOrchestrator:
 
     def _build_model_step(self, state):
         """Step 2: Build or load model architecture."""
-        if self._should_skip_step('trainer_config', 'skip_building'):
+        if self._should_skip_step('model_config', 'skip_building'):
             print("🏗️  Step 2: Model Building - SKIPPED")
             return
         

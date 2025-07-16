@@ -140,15 +140,21 @@ class CArchitectureManager:
             available = list(self.architecture_registry.keys())
             raise ValueError(f"Unknown architecture '{architecture_name}'. Available: {available}")
         
+        # Get model parameters from config
+        model_params = {
+            'input_dim': self.config.get('input_dim', 3),
+            'hidden_dims': self.config.get('hidden_dims', [128, 64, 32]),
+            'output_dim': self.config.get('output_dim', 1),
+            'activation': self.config.get('activation', 'relu'),
+            'dropout': self.config.get('dropout', 0.1)
+        }
+        
         # Create model
         model_class = self.architecture_registry[architecture_name]
-        model = model_class()
+        model = model_class(**model_params)
         
-        # Ensure float64 precision
-        model = model.double()
-        for param in model.parameters():
-            if param.dtype != torch.float64:
-                param.data = param.data.double()
+        # Use float32 for better compatibility and performance
+        model = model.float()
         
         return model
 
