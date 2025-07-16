@@ -11,7 +11,9 @@ The setup is focused on experimenting with the idea of _path-finding in latent s
 - `config.py`: Customizable hyperparameters
 - `dataset.py`: Dataset class
 - `train.py`: Simple training pipeline with checkpoint saving
-- `compute_volume.py`: utility functions for generating data
+- `compute_volume.py`: utility functions for generating latent->volume data
+- `visualize.py`: utility functions for data visualization
+- `sdf.py`: several different sdfs along with an interpolator class
 
 
 
