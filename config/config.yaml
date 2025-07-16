@@ -1,4 +1,4 @@
-home: &home_path /home/sei/tetrahedron_pair_ML # all other paths are relative to home
+home: &home_path /home/sei/topology-control # all other paths are relative to home
 
 artifacts_config:
   save_artifacts_to: artifacts 
@@ -10,6 +10,7 @@ processor_config:
     processed: &processed_data_path data/processed 
 
   train_val_split: 0.8
+
   point_cloud_params:
     radius: 0.02
     sigma: 0.01
