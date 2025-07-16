@@ -1,15 +1,15 @@
-home: &home_path /home/sei/topology-control # all other paths are relative to home
+home: &home_path /home/sei/repo/topology-control # all other paths are relative to home
 
 artifacts_config:
   save_artifacts_to: artifacts 
 
 processor_config:
-  skip_processing: true
+  skip_processing: false
   dataset_paths:
     raw: &raw_data_path data/raw 
     processed: &processed_data_path data/processed 
 
-  train_val_split: 0.8
+  train_val_split: 0.7
 
   point_cloud_params:
     radius: 0.02
@@ -18,13 +18,24 @@ processor_config:
     n_uniform: 1000
 
 model_config:
-  skip_building: true
-  # Specify configs
+  skip_building: false
+  model_name: mlp # pointnet
+  input_dim: 15000  # max_points (5000) * 3 (x,y,z coordinates)
+  hidden_dims: [512, 256, 128]
+  output_dim: 5000  # max_points (one signed distance per point)
+  activation: relu
+  dropout: 0.1
   
 trainer_config:
-  skip_training: true
+  skip_training: false
   processed_data_path: *processed_data_path
-  # Specify configs
+  loss_function: mse 
+  optimizer: adam
+  learning_rate: 0.001
+  batch_size: 32
+  num_epochs: 20
+  max_points: 5000  # Fixed number of points per sample for consistent batching
+  save_model: true  # Whether to save the trained model via artifact manager
   
 evaluator_config:
   skip_evaluation: true
