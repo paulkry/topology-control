@@ -103,30 +103,7 @@ class PointCloudProcessor:
             point_cloud.add_scalar_quantity("signed_distance", distances)
         
         ps.show()
-        
-class CDataProcessor:
-    def __init__(self, config):
-        """
-        Initialize the data processor with configuration parameters.
-        
-        Parameters:
-            config (dict): Configuration parameters for data processing.
-        """
-        self.config = config
 
-    def process_data(self, raw_data):
-        """
-        Process the raw data according to the configuration.
-        
-        Parameters:
-            raw_data: The input data to be processed.
-        
-        Returns:
-            Processed data.
-        """
-        # Implement data processing logic here
-        return raw_data  # Placeholder for processed data
-    
 """
 Dataset Class for training network
 mapping latent vectors to volumes
@@ -140,8 +117,8 @@ class VolumeDataset(Dataset):
         """
         self.file_path = dataset_path
         data = np.load(dataset_path)
-        self.latents = torch.tensor(data["latents"], dtype=torch.float32)
-        self.volumes = torch.tensor(data["volumes"], dtype=torch.float32)
+        self.latents = torch.tensor(data["latents"], dtype=torch.float64)
+        self.volumes = torch.tensor(data["volumes"], dtype=torch.float64)
         self.size = self.latents.shape[0]
 
     def __getitem__(self, idx):
@@ -174,3 +151,165 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+            
+class CDataProcessor:
+    def __init__(self, config):
+        """
+        Initialize the data processor with configuration parameters.
+        
+        Parameters:
+            config (dict): Configuration parameters for data processing including:
+                - dataset_paths: dict with paths to raw data and processed data
+                - point_cloud_params: dict with sampling parameters
+                - mesh_files: list of mesh file names to process
+        """
+        self.config = config
+        
+        # Extract paths from config
+        dataset_paths = config.get('dataset_paths', {})
+        self.raw_data_path = dataset_paths.get('raw', 'data/raw')
+        self.processed_data_path = dataset_paths.get('processed', 'data/processed')
+        
+        # Extract point cloud processing parameters
+        pc_params = config.get('point_cloud_params', {})
+        self.radius = pc_params.get('radius', 0.02)
+        self.sigma = pc_params.get('sigma', 0.01)
+        self.mu = pc_params.get('mu', 0.0)
+        self.n_gaussian = pc_params.get('n_gaussian', 5)
+        self.n_uniform = pc_params.get('n_uniform', 1000)
+        
+        # Get all mesh files from raw directory
+        self.mesh_files = self._discover_mesh_files()
+        
+        # Initialize point cloud processor
+        self.point_cloud_processor = PointCloudProcessor(data_dir=self.processed_data_path)
+    
+    def _discover_mesh_files(self):
+        """
+        Discover all mesh files in the raw data directory.
+        
+        Returns:
+            list: List of mesh file names found in raw directory
+        """
+        if not os.path.exists(self.raw_data_path):
+            print(f"Warning: Raw data path does not exist: {self.raw_data_path}")
+            return []
+        
+        # Common mesh file extensions
+        mesh_extensions = ['.obj', '.ply', '.stl', '.off', '.vtk']
+        mesh_files = []
+        
+        for file in os.listdir(self.raw_data_path):
+            file_path = os.path.join(self.raw_data_path, file)
+            if os.path.isfile(file_path):
+                _, ext = os.path.splitext(file)
+                if ext.lower() in mesh_extensions:
+                    mesh_files.append(file)
+        
+        print(f"Discovered {len(mesh_files)} mesh files in {self.raw_data_path}: {mesh_files}")
+        return mesh_files
+
+    def process(self):
+        """
+        Main processing method that integrates with the pipeline.
+        Uses the PointCloudProcessor to generate point clouds and signed distances.
+        
+        Returns:
+            dict: Processing results including file paths and statistics
+        """
+        print(f"Processing {len(self.mesh_files)} mesh files...")
+        
+        # Build full paths to mesh files
+        mesh_paths = []
+        for mesh_file in self.mesh_files:
+            mesh_path = os.path.join(self.raw_data_path, mesh_file)
+            if os.path.exists(mesh_path):
+                mesh_paths.append(mesh_path)
+            else:
+                print(f"Warning: Mesh file not found: {mesh_path}")
+        
+        if not mesh_paths:
+            raise ValueError(f"No valid mesh files found in {self.raw_data_path}")
+        
+        # Create processed data directory if it doesn't exist
+        os.makedirs(self.processed_data_path, exist_ok=True)
+        
+        # Process each mesh file using the PointCloudProcessor approach
+        processing_results = {
+            'processed_files': [],
+            'point_cloud_files': [],
+            'signed_distance_files': [],
+            'total_points_generated': 0,
+            'processing_params': {
+                'radius': self.radius,
+                'sigma': self.sigma,
+                'mu': self.mu,
+                'n_gaussian': self.n_gaussian,
+                'n_uniform': self.n_uniform
+            }
+        }
+        
+        for mesh_path in mesh_paths:
+            result = self._process_single_mesh(mesh_path)
+            processing_results['processed_files'].append(result['mesh_name'])
+            processing_results['point_cloud_files'].append(result['points_file'])
+            processing_results['signed_distance_files'].append(result['distances_file'])
+            processing_results['total_points_generated'] += result['num_points']
+        
+        print(f"Data processing complete. Generated {processing_results['total_points_generated']} total points.")
+        return processing_results
+    
+    def _process_single_mesh(self, mesh_path):
+        """
+        Process a single mesh file using the PointCloudProcessor logic.
+        
+        Parameters:
+            mesh_path (str): Path to the mesh file
+            
+        Returns:
+            dict: Results for this specific mesh
+        """
+        # Load and normalize mesh using PointCloudProcessor method
+        vertices, faces, name = self.point_cloud_processor.load_mesh(mesh_path)
+        
+        # Define output file paths (following PointCloudProcessor naming convention)
+        points_file = os.path.join(self.processed_data_path, f"{name}_sampled_points.npy")
+        distances_file = os.path.join(self.processed_data_path, f"{name}_signed_distances.npy")
+        
+        # Check if data already exists (same logic as PointCloudProcessor)
+        if os.path.exists(points_file) and os.path.exists(distances_file):
+            print(f"  [Existing File] Loading data for {name}")
+            sampled_points = np.load(points_file)
+            distances = np.load(distances_file)
+        else:
+            print(f"  [New File] Sampling points for {name}")
+            # Sample points using PointCloudProcessor method with config parameters
+            sampled_points = self.point_cloud_processor.sample_points(
+                vertices, faces, 
+                radius=self.radius,
+                sigma=self.sigma,
+                mu=self.mu,
+                n_gaussian=self.n_gaussian,
+                n_uniform=self.n_uniform
+            )
+            
+            # Compute signed distances (same as PointCloudProcessor)
+            distances = igl.signed_distance(sampled_points, vertices, faces)[0]
+            
+            # Save data (same format as PointCloudProcessor)
+            np.save(points_file, sampled_points)
+            np.save(distances_file, distances)
+            print(f"    Saved {len(sampled_points)} points to {points_file}")
+            print(f"    Saved distances to {distances_file}")
+        
+        return {
+            'mesh_name': name,
+            'points_file': points_file,
+            'distances_file': distances_file,
+            'num_points': len(sampled_points),
+            'vertices': vertices,
+            'faces': faces
+        }
+    
