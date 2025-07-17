@@ -14,7 +14,7 @@ import os
 import time
 from glob import glob
 torch.set_default_dtype(torch.float32)
-from CArchitectureManager import DeepSDF
+from src.CArchitectureManager import DeepSDF
 
 class SDFDataset(Dataset):
     """
