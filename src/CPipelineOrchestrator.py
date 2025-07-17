@@ -1,5 +1,5 @@
 """
-Pipeline orchestrator for 3D shape classification.
+Pipeline orchestrator for 3D shape analysis.
 
 Manages the complete ML pipeline:
 - Data processing
@@ -137,6 +137,8 @@ class CPipelineOrchestrator:
         state["processing_report"] = processing_results
         
         if processing_results:
+            self._log_processing_summary(processing_results)
+        
             self.artifact_manager.save_artifacts(
                 data_processing_results=processing_results
             )
@@ -186,20 +188,32 @@ class CPipelineOrchestrator:
         training_results = self.model_trainer.train_and_validate(model)
         
         # Handle different return formats from trainer
-        if isinstance(training_results, tuple):
-            trained_model = training_results[0]
-            additional_results = training_results[1:] if len(training_results) > 1 else []
+        if isinstance(training_results, tuple) and len(training_results) == 2:
+            trained_model, training_report = training_results
         else:
             trained_model = training_results
-            additional_results = []
+            training_report = {}
         
         state["trained_model"] = trained_model
-        state["training_results"] = additional_results
+        state["training_results"] = training_report
+        
+        # Save the trained model using artifact manager
+        trainer_config = self.config.get('trainer_config', {})
+        if trainer_config.get('save_model', True):
+            model_metadata = {
+                'best_val_loss': training_report.get('best_val_loss', float('inf')),
+                'total_epochs': training_report.get('total_epochs', 0),
+                'final_train_loss': training_report.get('final_train_loss', 0),
+                'final_val_loss': training_report.get('final_val_loss', 0)
+            }
+            model_path = self.artifact_manager.save_model(trained_model, "trained_model", model_metadata)
+            if model_path:
+                training_report["model_saved_path"] = model_path
+                training_report["model_filename"] = os.path.basename(model_path)
         
         # Save training artifacts
         self.artifact_manager.save_artifacts(
-            trained_model=trained_model,
-            training_results=additional_results
+            training_results=training_report
         )
         print("✅ Step 3: Model Training Complete")
 
@@ -210,16 +224,14 @@ class CPipelineOrchestrator:
             raise ValueError("Training is skipped but no model_path specified in evaluator_config.")
         
         print(f"📁 Step 3: Loading Pre-trained Model from {model_path}...")
-        # This should be implemented based on your model loading logic
-        # For now, using the model from build step as placeholder
         model = state.get("model")
         if not model:
             raise ValueError("No model architecture available for loading weights.")
         
-        # TODO: Implement actual model loading logic here
-        # model.load_state_dict(torch.load(model_path))
+        # Use artifact manager to load the model
+        trained_model = self.artifact_manager.load_model(model, model_path)
         
-        state["trained_model"] = model
+        state["trained_model"] = trained_model
         print("✅ Step 3: Pre-trained Model Loaded")
 
     def _evaluate_model_step(self, state):
@@ -248,12 +260,53 @@ class CPipelineOrchestrator:
         summary = {
             'pipeline_completed': True,
             'steps_completed': [
-                'data_processing' if 'data' in state else 'skipped',
+                'data_processing' if 'processing_report' in state else 'skipped',
                 'model_building' if 'model' in state else 'skipped', 
                 'training' if 'trained_model' in state else 'skipped',
                 'evaluation' if 'evaluation_results' in state else 'skipped'
             ],
             'artifacts_generated': list(state.keys())
         }
+        
+        # Add data processing stats to summary
+        if 'processing_report' in state:
+            processing_report = state['processing_report']
+            summary['data_processing_stats'] = {
+                'total_files': len(processing_report.get('processed_files', [])),
+                'train_files': processing_report.get('train_count', 0),
+                'val_files': processing_report.get('val_count', 0),
+                'corrupted_files': len(processing_report.get('corrupted_files', [])),
+                'success_rate': processing_report.get('success_rate', 0)
+            }
+        
         self.artifact_manager.save_artifacts(pipeline_summary=summary)
-        print(f"📋 Pipeline Summary: {', '.join(summary['steps_completed'])}")
+        
+        # Enhanced summary logging
+        completed_steps = [step for step in summary['steps_completed'] if step != 'skipped']
+        print(f"📋 Pipeline Summary: {', '.join(completed_steps)}")
+        
+        if 'data_processing_stats' in summary:
+            stats = summary['data_processing_stats']
+            if stats['corrupted_files'] > 0:
+                print(f"   ⚠️  Data processing: {stats['corrupted_files']} corrupted files skipped")
+                print(f"   Success rate: {stats['success_rate']:.1%}")
+
+    def _log_processing_summary(self, results):
+        """Log a detailed summary of data processing results."""
+        print("\n📊 Data Processing Summary:")
+        print(f"  Total files processed: {len(results['processed_files'])}")
+        print(f"  Train files: {results['train_count']}")
+        print(f"  Val files: {results['val_count']}")
+        print(f"  Total points generated: {results['total_points_generated']:,}")
+        
+        if results.get('corrupted_files'):
+            print(f"  ⚠️  Corrupted files skipped: {len(results['corrupted_files'])}")
+            print(f"  Success rate: {results.get('success_rate', 0):.1%}")
+            
+            # List corrupted files if there are any
+            if len(results['corrupted_files']) <= 10:
+                print(f"  Corrupted files: {', '.join(results['corrupted_files'])}")
+            else:
+                print(f"  Corrupted files: {', '.join(results['corrupted_files'][:10])}... (and {len(results['corrupted_files'])-10} more)")
+        
+        print()

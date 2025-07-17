@@ -8,9 +8,9 @@ A modular, config-driven ML pipeline for 3D shape classification using PyTorch. 
 - **Modular Pipeline**: Data processing → Model building → Training → Evaluation
 - **Auto-Discovery**: Automatically finds and processes mesh files in raw data directory
 - **Config-Driven**: Fully configurable via YAML files
-- **Artifact Management**: Saves experiment results, model info, and training plots as text files
+- **Artifact Management**: Saves experiment results, model info, and training plots
 - **3D Shape Processing**: Converts meshes to point clouds with signed distance fields
-- **Flexible Architecture**: Supports MLP models with configurable layers
+- **Flexible Architecture**: Supports configurable models
 
 ## Setup
 
