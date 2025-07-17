@@ -153,5 +153,5 @@ if __name__ == "__main__":
     #----------------------------------------------------------------
     # Synthetic Data Generation
 
-    generate_syn_latent_volume_data(10000)
+    generate_syn_latent_volume_data(200)
     

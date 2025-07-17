@@ -28,3 +28,24 @@ class VolumeDataset(Dataset):
 
     def __len__(self):
         return self.size
+
+""""
+from scipy.interpolate import griddata
+from matplotlib import pyplot as plt
+
+x_new = np.linspace(min(xs), max(xs), 100)
+y_new = np.linspace(min(ys), max(ys), 100)
+X_grid, Y_grid = np.meshgrid(x_new, y_new)
+Z_interpolated = griddata((xs, ys), volumes, (X_grid, Y_grid), method='linear')
+
+plt.figure(figsize=(8, 6))
+plt.contourf(X_grid, Y_grid, Z_interpolated, levels=20, cmap='viridis')
+plt.colorbar(label='Interpolated Z value')
+plt.scatter(xs, ys, c='red', s=10, label='Original Data Points')
+plt.title('2D Interpolated Grid')
+plt.xlabel('X-axis')
+plt.ylabel('Y-axis')
+plt.legend()
+plt.grid(True)
+plt.show()
+"""

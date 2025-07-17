@@ -12,7 +12,7 @@ from config import LATENT_DIM, DEV, BATCH_SIZE, LR, EPOCHS
 
 if __name__ == "__main__":
     dataset = VolumeDataset(
-        dataset_path="data/processed/volume",
+        dataset_path="./data/2d_latents_volumes.npz"  # Path to the dataset file,
     )
 
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
