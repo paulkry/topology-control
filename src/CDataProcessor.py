@@ -5,8 +5,7 @@ import os
 import numpy as np
 import meshio as meshio
 import igl
-import torch
-from CGeometryUtils import PointCloudProcessor, VolumeProcessor
+from src.CGeometryUtils import PointCloudProcessor, VolumeProcessor
   
 class CDataProcessor:
     def __init__(self, config):
