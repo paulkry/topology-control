@@ -1,10 +1,9 @@
 import torch
-torch.set_default_dtype(torch.float64)
+from torch import nn
 
 # ============================================================================
 # Models
 # ============================================================================
-
 class SimpleMLP(torch.nn.Module):
     def __init__(self, input_dim=3, hidden_dims=[128, 64, 32], output_dim=1, activation='relu', dropout=0.1):
         """
@@ -111,11 +110,163 @@ class SimpleMLP(torch.nn.Module):
             'layers': layer_info,
             'task': self.task
         }
- 
+
+class DeepSDF(nn.Module):
+
+    def __init__(self, config=None):
+        super(DeepSDF, self).__init__()
+        
+        # Handle configuration
+        if config is None:
+            config = {}
+        
+        # Extract parameters with defaults (no hardcoded constants)
+        self.z_dim = config.get('z_dim', 128)  # Latent vector dimension
+        self.layer_size = config.get('layer_size', 256)  # Hidden layer dimension
+        self.dropout_p = config.get('dropout_p', 0.2)
+        self.coord_dim = config.get('coord_dim', 3)  # 3D coordinates
+        
+        # Store architecture info
+        self.input_dim = self.z_dim + self.coord_dim
+        self.output_dim = 1
+        self.task = "signed_distance_prediction"
+        
+        # Build network layers
+        input_dim = self.z_dim + self.coord_dim  # latent + coordinates
+        
+        # Ensure layer_size is large enough for the skip connection architecture
+        min_layer_size = max(self.layer_size, input_dim + 32)  # Ensure sufficient capacity
+        self.layer_size = min_layer_size
+        
+        self.input_layer = self.create_layer_block(input_dim, self.layer_size)
+        self.layer2 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer3 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer4 = self.create_layer_block(self.layer_size, self.layer_size - input_dim)
+        self.layer5 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer6 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer7 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer8 = nn.Linear(self.layer_size, 1)
+        
+        # Initialize weights
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """Initialize network weights using Xavier/Glorot initialization."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                nn.init.zeros_(module.bias)
+
+    def create_layer_block(self, input_size, output_size):
+        return nn.Sequential(
+            nn.Linear(input_size, output_size),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_p)
+        )
+
+    def forward(self, x=None, latent_vec=None, coords=None):
+        """
+        Forward pass - supports both unified input and separate inputs.
+        
+        Args:
+            x: Unified input tensor of shape [batch_size, z_dim + 3] (alternative interface)
+            latent_vec: Latent vector of shape [batch_size, z_dim] (DeepSDF interface)
+            coords: Coordinates of shape [batch_size, num_coords, 3] (DeepSDF interface)
+            
+        Returns:
+            torch.Tensor: SDF values
+        """
+        if x is not None:
+            # Unified interface (like SimpleMLP)
+            # Ensure input is the right shape
+            if x.dim() == 1:
+                x = x.unsqueeze(0)  # Add batch dimension if missing
+            
+            # If input is 2D [batch_size, features] treat as single point
+            if x.dim() == 2:
+                # Add coordinate dimension: [batch_size, 1, features]
+                x = x.unsqueeze(1)
+            
+            # Split into latent and coords
+            latent_vec = x[:, :, :self.z_dim]  # [batch_size, num_coords, z_dim]
+            coords = x[:, :, self.z_dim:]      # [batch_size, num_coords, 3]
+            
+        elif latent_vec is not None and coords is not None:
+            # DeepSDF interface is latent_vec: [batch_size, z_dim] and coords: [batch_size, num_coords, 3]
+            
+            # Expand latent vector to match coordinate dimensions
+            latent_vec = latent_vec.unsqueeze(1).repeat(1, coords.shape[1], 1)
+        else:
+            raise ValueError("Must provide either 'x' or both 'latent_vec' and 'coords'")
+        
+        # Concatenate latent and coordinates
+        x = torch.cat([latent_vec, coords], dim=-1)
+        skip_x = x
+
+        x = self.input_layer(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(torch.cat([x, skip_x], dim=-1))  # skip connection
+        x = self.layer6(x)
+        x = self.layer7(x)
+        x = self.layer8(x)
+
+        # Return SDF values
+        result = x.squeeze(-1).tanh()
+        
+        # If input was 2D (single point), return 2D output
+        if result.dim() == 3 and result.shape[1] == 1:
+            result = result.squeeze(1)
+            
+        return result
+    
+    def get_architecture_info(self):
+        """Get information about the network architecture."""
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        
+        layer_info = []
+        for i, layer in enumerate([self.input_layer, self.layer2, self.layer3, 
+                                  self.layer4, self.layer5, self.layer6, 
+                                  self.layer7, self.layer8]):
+            if hasattr(layer, '__len__') and len(layer) > 0:
+                # Sequential layer block
+                linear_layer = layer[0]  # First layer is Linear
+                layer_info.append({
+                    'layer': i,
+                    'type': 'Sequential(Linear+ReLU+Dropout)',
+                    'input_size': linear_layer.in_features,
+                    'output_size': linear_layer.out_features,
+                    'parameters': linear_layer.in_features * linear_layer.out_features + linear_layer.out_features
+                })
+            elif isinstance(layer, nn.Linear):
+                # Final linear layer
+                layer_info.append({
+                    'layer': i,
+                    'type': 'Linear',
+                    'input_size': layer.in_features,
+                    'output_size': layer.out_features,
+                    'parameters': layer.in_features * layer.out_features + layer.out_features
+                })
+        
+        return {
+            'architecture': 'DeepSDF',
+            'input_dim': self.input_dim,
+            'output_dim': self.output_dim,
+            'z_dim': self.z_dim,
+            'coord_dim': self.coord_dim,
+            'layer_size': self.layer_size,
+            'dropout_p': self.dropout_p,
+            'total_parameters': total_params,
+            'trainable_parameters': trainable_params,
+            'layers': layer_info,
+            'task': self.task
+        }
+    
 # ============================================================================
 # ARCHITECTURE MANAGER
 # ============================================================================
-
 class CArchitectureManager:
     """Main manager for neural network architectures"""
     def __init__(self, config):
@@ -124,38 +275,66 @@ class CArchitectureManager:
         # Registry of available architectures
         self.architecture_registry = {
             'mlp': SimpleMLP,
+            'deepsdf': DeepSDF,
         }
     
-    def get_model(self):
+    def get_model(self, device=None):
         """
         Create and return the configured model
+        
+        Args:
+            device: Target device for the model
         
         Returns:
             nn.Module: Configured neural network model
         """
         # Get architecture configuration
         architecture_name = self.config['model_name'].lower()
+        architecture_config = self.config.get('architecture', {}).get(architecture_name, {})
+        
+        # For backward compatibility, also check root-level config
+        if not architecture_config:
+            # Use relevant config parameters from the root level
+            if architecture_name == 'mlp':
+                architecture_config = {
+                    'input_dim': self.config.get('input_dim', 3),
+                    'hidden_dims': self.config.get('hidden_dims', [128, 64, 32]),
+                    'output_dim': self.config.get('output_dim', 1),
+                    'activation': self.config.get('activation', 'relu'),
+                    'dropout': self.config.get('dropout', 0.1)
+                }
+            elif architecture_name == 'deepsdf':
+                architecture_config = {
+                    'z_dim': self.config.get('z_dim', 256),
+                    'layer_size': self.config.get('layer_size', 32),
+                    'dropout_p': self.config.get('dropout_p', 0.2),
+                    'coord_dim': self.config.get('coord_dim', 3)
+                }
         
         # Validate architecture exists
         if architecture_name not in self.architecture_registry:
             available = list(self.architecture_registry.keys())
             raise ValueError(f"Unknown architecture '{architecture_name}'. Available: {available}")
         
-        # Get model parameters from config
-        model_params = {
-            'input_dim': self.config.get('input_dim', 3),
-            'hidden_dims': self.config.get('hidden_dims', [128, 64, 32]),
-            'output_dim': self.config.get('output_dim', 1),
-            'activation': self.config.get('activation', 'relu'),
-            'dropout': self.config.get('dropout', 0.1)
-        }
-        
-        # Create model
+        # Create model with appropriate configuration
         model_class = self.architecture_registry[architecture_name]
-        model = model_class(**model_params)
         
-        # Ensure model is in float64 precision
-        model = model.double()
+        if architecture_name == 'mlp':
+            # SimpleMLP expects individual parameters
+            model = model_class(**architecture_config)
+        elif architecture_name == 'deepsdf':
+            # DeepSDF expects a config dict
+            model = model_class(config=architecture_config)
+        else:
+            # Default: try passing config dict
+            model = model_class(architecture_config)
+        
+        # Use float32 for better compatibility and performance
+        model = model.float()
+        
+        # Move to device if specified
+        if device is not None:
+            model = model.to(device)
         
         return model
 

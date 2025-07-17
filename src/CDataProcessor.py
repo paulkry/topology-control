@@ -5,7 +5,8 @@ import os
 import numpy as np
 import meshio as meshio
 import igl
-from src.CGeometryUtils import PointCloudProcessor
+import torch
+from CGeometryUtils import PointCloudProcessor, VolumeProcessor
   
 class CDataProcessor:
     def __init__(self, config):
@@ -22,9 +23,20 @@ class CDataProcessor:
         
         # Extract paths from config
         dataset_paths = config.get('dataset_paths', {})
-        self.raw_data_path = dataset_paths.get('raw', 'data/raw')
-        self.processed_data_path = dataset_paths.get('processed', 'data/processed')
+        raw_path = dataset_paths.get('raw', 'data/raw')
+        processed_path = dataset_paths.get('processed', 'data/processed')
         
+         # Handle relative paths - make them relative to the project root
+        if not os.path.isabs(raw_path):
+            # Get the project root (parent of src directory)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_dir)  # Go up from src to project root
+            self.raw_data_path = os.path.join(project_root, raw_path)
+            self.processed_data_path = os.path.join(project_root, processed_path)
+        else:
+            self.raw_data_path = raw_path
+            self.processed_data_path = processed_path
+            
         # Automatically derive train and val paths from processed path
         self.train_data_path = os.path.join(self.processed_data_path, 'train')
         self.val_data_path = os.path.join(self.processed_data_path, 'val')
@@ -40,11 +52,19 @@ class CDataProcessor:
         self.n_gaussian = pc_params.get('n_gaussian', 5)
         self.n_uniform = pc_params.get('n_uniform', 1000)
         
+        # Extract the volume processor parameter
+        v_params = config.get('volume_processor_params', {})
+        self.device = v_params.get('device', 'cpu')  # Default to CPU
+        self.resolution = v_params.get('resolution', 64)  # Default resolution
+        
         # Get all mesh files from raw directory
         self.mesh_files = self._discover_mesh_files()
         
         # Initialize point cloud processor
         self.point_cloud_processor = PointCloudProcessor(data_dir=self.processed_data_path)
+        
+        # Initialize volume processor 
+        self.volume_processor = VolumeProcessor(device=self.device, resolution=self.resolution)
     
     def process(self):
         """
@@ -206,6 +226,7 @@ class CDataProcessor:
         # Load and normalize mesh using PointCloudProcessor method
         vertices, faces, name = self.point_cloud_processor.load_mesh(mesh_path)
         
+        
         # Determine output directory based on split
         if split == 'train':
             output_dir = self.train_data_path
@@ -253,4 +274,77 @@ class CDataProcessor:
             'faces': faces,
             'split': split
         }
+        
+    def generate_sdf_dataset(self, z_dim=32, latent_mean=0.0, latent_sd=0.01):
+        """
+        Generate SDF dataset compatible with DeepSDF training pipeline.
+        Uses both PointCloudProcessor and VolumeProcessor outputs.
+        
+        Parameters:
+            z_dim (int): Latent vector dimension
+            latent_mean (float): Mean for latent vector initialization
+            latent_sd (float): Standard deviation for latent vector initialization
+            
+        Returns:
+            dict: Dataset information for SDF training
+        """
+        # First ensure data is processed
+        processing_results = self.process()
+        
+        # Get the device and resolution parameters from the VolumeProcessor
+        device = self.volume_processor.device
+        resolution = self.volume_processor.resolution
+        
+        # Get volume coordinates from VolumeProcessor
+        volume_coords = self.volume_processor._get_volume_coords(device=device, resolution=resolution)
+        
+        # Create dataset metadata
+        dataset_info = {
+            'train_files': [],
+            'val_files': [],
+            'volume_coords': volume_coords,
+            'dataset_params': {
+                'z_dim': z_dim,
+                'latent_mean': latent_mean,
+                'latent_sd': latent_sd,
+                'num_samples': self.n_uniform + self.n_gaussian * 10,
+                'volume_coords_resolution': self.resolution,
+                'point_cloud_params': processing_results['processing_params']
+            },
+            'processing_results': processing_results
+        }
+        
+        # Collect train files
+        for i, mesh_name in enumerate(processing_results['train_files']):
+            points_file = processing_results['point_cloud_files']['train'][i]
+            distances_file = processing_results['signed_distance_files']['train'][i]
+            
+            dataset_info['train_files'].append({
+                'mesh_name': mesh_name,
+                'points_file': points_file,
+                'distances_file': distances_file,
+                'split': 'train'
+            })
+        
+        # Collect val files
+        for i, mesh_name in enumerate(processing_results['val_files']):
+            points_file = processing_results['point_cloud_files']['val'][i]
+            distances_file = processing_results['signed_distance_files']['val'][i]
+            
+            dataset_info['val_files'].append({
+                'mesh_name': mesh_name,
+                'points_file': points_file,
+                'distances_file': distances_file,
+                'split': 'val'
+            })
+        
+        print(f"Generated SDF dataset info:")
+        print(f"  Train files: {len(dataset_info['train_files'])}")
+        print(f"  Val files: {len(dataset_info['val_files'])}")
+        print(f"  Total points: {processing_results['total_points_generated']}")
+        print(f"  Volume resolution: {self.resolution}³")
+        
+        return dataset_info
+    
+
     

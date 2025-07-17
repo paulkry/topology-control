@@ -1,27 +1,57 @@
 import os
+import torch
 import numpy as np
 import meshio as meshio
-import igl
 import polyscope as ps
 from pathlib import Path
+from pysdf import SDF
+import igl
+from torch.utils.data import Dataset
 
 """
-   [To be Completed] Functions for visualization and processing of meshes
+   Functions for visualization and processing of meshes
 """
 
-class Renderer:
-    def __init__(self, mesh):
-        """
-        Parameters:
-            To be Defined
-        """
-        self.mesh = mesh
-
-    def render(self):
-        return None
-
-    def save(self, filename):
-        return None
+class MeshRenderer:
+    """Dedicated class for mesh visualization"""
+    
+    def __init__(self, renderer='polyscope'):
+        self.renderer = renderer
+        if renderer == 'polyscope':
+            ps.init()
+    
+    def render_mesh(self, vertices, faces, name="mesh"):
+        """Render a single mesh"""
+        if self.renderer == 'polyscope':
+            ps.register_surface_mesh(name, vertices, faces)
+            return ps.get_surface_mesh(name)
+        else:
+            raise ValueError(f"Renderer {self.renderer} not supported")
+    
+    def render_point_cloud(self, points, name="points", sdf_values=None):
+        """Render point cloud with optional SDF coloring"""
+        if self.renderer == 'polyscope':
+            pc = ps.register_point_cloud(name, points)
+            if sdf_values is not None:
+                pc.add_scalar_quantity("signed_distance", sdf_values)
+            return pc
+        else:
+            raise ValueError(f"Renderer {self.renderer} not supported")
+    
+    def render_mesh_with_points(self, vertices, faces, points, sdf_values=None, mesh_name="mesh", points_name="points"):
+        """Render mesh and point cloud together"""
+        self.render_mesh(vertices, faces, mesh_name)
+        self.render_point_cloud(points, points_name, sdf_values)
+    
+    def show(self):
+        """Display the visualization"""
+        if self.renderer == 'polyscope':
+            ps.show()
+    
+    def clear(self):
+        """Clear all visualizations"""
+        if self.renderer == 'polyscope':
+            ps.remove_all_structures()
     
 class PointCloudProcessor:
     """Pipeline for generating point clouds from meshes"""
@@ -30,6 +60,7 @@ class PointCloudProcessor:
         self.data_dir = data_dir
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
+        self.renderer = MeshRenderer()
     
     def load_mesh(self, mesh_file):
         """Load and normalize mesh"""
@@ -111,9 +142,69 @@ class PointCloudProcessor:
                 np.save(distances_file, distances)
             
             # Visualize on Polyscope
-            ps.register_surface_mesh(name, vertices, faces)
-            point_cloud = ps.register_point_cloud(f"{name}_points", sampled_points)
-            point_cloud.add_scalar_quantity("signed_distance", distances)
+            self.renderer.render_mesh_with_points(vertices, faces, sampled_points, distances, name, f"{name}_points")
         
-        ps.show()
-      
+        self.renderer.show()
+    
+    def get_dataset_stats(self, mesh_name):
+        """Get statistics about generated dataset"""
+        points_file = f"{self.data_dir}/{mesh_name}_sampled_points.npy"
+        distances_file = f"{self.data_dir}/{mesh_name}_signed_distances.npy"
+        
+        if os.path.exists(points_file) and os.path.exists(distances_file):
+            points = np.load(points_file)
+            distances = np.load(distances_file)
+            
+            print(f"Dataset stats for {mesh_name}:")
+            print(f"  Total points: {len(points)}")
+            print(f"  SDF range: [{distances.min():.4f}, {distances.max():.4f}]")
+            print(f"  Inside surface (SDF < 0): {(distances < 0).sum()}")
+            print(f"  Outside surface (SDF > 0): {(distances > 0).sum()}")
+            print(f"  Near surface (|SDF| < 0.01): {(np.abs(distances) < 0.01).sum()}")
+            
+            return {'points': points, 'distances': distances}
+        else:
+            print(f"No dataset found for {mesh_name}")
+            return None
+    
+class VolumeProcessor:
+    """Dedicated processor for volume sampling and grid operations"""
+    
+    def __init__(self, device="cpu", resolution=50):
+        """
+        Initialize volume processor
+        
+        Parameters:
+            device (str): Device for volume coordinates computation
+            resolution (int): Volume grid resolution
+        """
+        self.device = device
+        self.resolution = resolution
+        
+        # Initialize volume coordinates for sampling
+        self.volume_coords, self.grid_size_axis = self._get_volume_coords(device, resolution)
+        
+        print(f"Volume Processor initialized with {resolution}³ volume grid on {device}")
+    
+    def _get_volume_coords(self, device, resolution=50):
+        """Get 3-dimensional vector (M, N, P) according to the desired resolutions."""
+        grid_values = torch.arange(-1, 1, float(1/resolution)).to(device)
+        grid = torch.meshgrid(grid_values, grid_values, grid_values, indexing='ij')
+        grid_size_axis = grid_values.shape[0]
+        coords = torch.vstack((grid[0].ravel(), grid[1].ravel(), grid[2].ravel())).transpose(1, 0).to(device)
+        return coords, grid_size_axis
+    
+    def sample_volume_points(self, num_samples=1000):
+        """
+        Sample random points from the volume grid
+        
+        Parameters:
+            num_samples (int): Number of volume samples
+            
+        Returns:
+            np.ndarray: Random volume points
+        """
+        random_indices = np.random.choice(
+            range(self.volume_coords.shape[0]), num_samples, replace=False
+        )
+        return self.volume_coords[random_indices].cpu().numpy()
