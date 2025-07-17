@@ -1,5 +1,4 @@
 import torch
-from torch import nn
 
 # ============================================================================
 # Models
@@ -111,7 +110,7 @@ class SimpleMLP(torch.nn.Module):
             'task': self.task
         }
 
-class DeepSDF(nn.Module):
+class DeepSDF(torch.nn.Module):
 
     def __init__(self, config=None):
         super(DeepSDF, self).__init__()
@@ -145,7 +144,7 @@ class DeepSDF(nn.Module):
         self.layer5 = self.create_layer_block(self.layer_size, self.layer_size)
         self.layer6 = self.create_layer_block(self.layer_size, self.layer_size)
         self.layer7 = self.create_layer_block(self.layer_size, self.layer_size)
-        self.layer8 = nn.Linear(self.layer_size, 1)
+        self.layer8 = torch.nn.Linear(self.layer_size, 1)
         
         # Initialize weights
         self._initialize_weights()
@@ -153,15 +152,15 @@ class DeepSDF(nn.Module):
     def _initialize_weights(self):
         """Initialize network weights using Xavier/Glorot initialization."""
         for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                nn.init.zeros_(module.bias)
+            if isinstance(module, torch.nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                torch.nn.init.zeros_(module.bias)
 
     def create_layer_block(self, input_size, output_size):
-        return nn.Sequential(
-            nn.Linear(input_size, output_size),
-            nn.ReLU(),
-            nn.Dropout(self.dropout_p)
+        return torch.nn.Sequential(
+            torch.nn.Linear(input_size, output_size),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(self.dropout_p)
         )
 
     def forward(self, x=None, latent_vec=None, coords=None):
@@ -240,7 +239,7 @@ class DeepSDF(nn.Module):
                     'output_size': linear_layer.out_features,
                     'parameters': linear_layer.in_features * linear_layer.out_features + linear_layer.out_features
                 })
-            elif isinstance(layer, nn.Linear):
+            elif isinstance(layer, torch.nn.Linear):
                 # Final linear layer
                 layer_info.append({
                     'layer': i,
