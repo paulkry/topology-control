@@ -1,4 +1,5 @@
 import torch
+torch.set_default_dtype(torch.float64)
 
 # ============================================================================
 # Models
@@ -153,8 +154,8 @@ class CArchitectureManager:
         model_class = self.architecture_registry[architecture_name]
         model = model_class(**model_params)
         
-        # Use float32 for better compatibility and performance
-        model = model.float()
+        # Ensure model is in float64 precision
+        model = model.double()
         
         return model
 
