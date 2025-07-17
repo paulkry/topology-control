@@ -1,5 +1,5 @@
 """
-Pipeline orchestrator for 3D shape classification.
+Pipeline orchestrator for 3D shape analysis.
 
 Manages the complete ML pipeline:
 - Data processing
@@ -186,20 +186,32 @@ class CPipelineOrchestrator:
         training_results = self.model_trainer.train_and_validate(model)
         
         # Handle different return formats from trainer
-        if isinstance(training_results, tuple):
-            trained_model = training_results[0]
-            additional_results = training_results[1:] if len(training_results) > 1 else []
+        if isinstance(training_results, tuple) and len(training_results) == 2:
+            trained_model, training_report = training_results
         else:
             trained_model = training_results
-            additional_results = []
+            training_report = {}
         
         state["trained_model"] = trained_model
-        state["training_results"] = additional_results
+        state["training_results"] = training_report
+        
+        # Save the trained model using artifact manager
+        trainer_config = self.config.get('trainer_config', {})
+        if trainer_config.get('save_model', True):
+            model_metadata = {
+                'best_val_loss': training_report.get('best_val_loss', float('inf')),
+                'total_epochs': training_report.get('total_epochs', 0),
+                'final_train_loss': training_report.get('final_train_loss', 0),
+                'final_val_loss': training_report.get('final_val_loss', 0)
+            }
+            model_path = self.artifact_manager.save_model(trained_model, "trained_model", model_metadata)
+            if model_path:
+                training_report["model_saved_path"] = model_path
+                training_report["model_filename"] = os.path.basename(model_path)
         
         # Save training artifacts
         self.artifact_manager.save_artifacts(
-            trained_model=trained_model,
-            training_results=additional_results
+            training_results=training_report
         )
         print("✅ Step 3: Model Training Complete")
 
@@ -210,16 +222,14 @@ class CPipelineOrchestrator:
             raise ValueError("Training is skipped but no model_path specified in evaluator_config.")
         
         print(f"📁 Step 3: Loading Pre-trained Model from {model_path}...")
-        # This should be implemented based on your model loading logic
-        # For now, using the model from build step as placeholder
         model = state.get("model")
         if not model:
             raise ValueError("No model architecture available for loading weights.")
         
-        # TODO: Implement actual model loading logic here
-        # model.load_state_dict(torch.load(model_path))
+        # Use artifact manager to load the model
+        trained_model = self.artifact_manager.load_model(model, model_path)
         
-        state["trained_model"] = model
+        state["trained_model"] = trained_model
         print("✅ Step 3: Pre-trained Model Loaded")
 
     def _evaluate_model_step(self, state):
