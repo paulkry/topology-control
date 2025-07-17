@@ -3,6 +3,7 @@ import torch
 # ============================================================================
 # Models
 # ============================================================================
+
 class SimpleMLP(torch.nn.Module):
     def __init__(self, input_dim=3, hidden_dims=[128, 64, 32], output_dim=1, activation='relu', dropout=0.1):
         """

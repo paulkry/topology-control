@@ -137,6 +137,8 @@ class CPipelineOrchestrator:
         state["processing_report"] = processing_results
         
         if processing_results:
+            self._log_processing_summary(processing_results)
+        
             self.artifact_manager.save_artifacts(
                 data_processing_results=processing_results
             )
@@ -265,5 +267,46 @@ class CPipelineOrchestrator:
             ],
             'artifacts_generated': list(state.keys())
         }
+        
+        # Add data processing stats to summary
+        if 'processing_report' in state:
+            processing_report = state['processing_report']
+            summary['data_processing_stats'] = {
+                'total_files': len(processing_report.get('processed_files', [])),
+                'train_files': processing_report.get('train_count', 0),
+                'val_files': processing_report.get('val_count', 0),
+                'corrupted_files': len(processing_report.get('corrupted_files', [])),
+                'success_rate': processing_report.get('success_rate', 0)
+            }
+        
         self.artifact_manager.save_artifacts(pipeline_summary=summary)
-        print(f"📋 Pipeline Summary: {', '.join(summary['steps_completed'])}")
+        
+        # Enhanced summary logging
+        completed_steps = [step for step in summary['steps_completed'] if step != 'skipped']
+        print(f"📋 Pipeline Summary: {', '.join(completed_steps)}")
+        
+        if 'data_processing_stats' in summary:
+            stats = summary['data_processing_stats']
+            if stats['corrupted_files'] > 0:
+                print(f"   ⚠️  Data processing: {stats['corrupted_files']} corrupted files skipped")
+                print(f"   Success rate: {stats['success_rate']:.1%}")
+
+    def _log_processing_summary(self, results):
+        """Log a detailed summary of data processing results."""
+        print("\n📊 Data Processing Summary:")
+        print(f"  Total files processed: {len(results['processed_files'])}")
+        print(f"  Train files: {results['train_count']}")
+        print(f"  Val files: {results['val_count']}")
+        print(f"  Total points generated: {results['total_points_generated']:,}")
+        
+        if results.get('corrupted_files'):
+            print(f"  ⚠️  Corrupted files skipped: {len(results['corrupted_files'])}")
+            print(f"  Success rate: {results.get('success_rate', 0):.1%}")
+            
+            # List corrupted files if there are any
+            if len(results['corrupted_files']) <= 10:
+                print(f"  Corrupted files: {', '.join(results['corrupted_files'])}")
+            else:
+                print(f"  Corrupted files: {', '.join(results['corrupted_files'][:10])}... (and {len(results['corrupted_files'])-10} more)")
+        
+        print()

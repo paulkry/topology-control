@@ -104,6 +104,9 @@ class CDataProcessor:
             'processed_files': [],
             'train_files': [],
             'val_files': [],
+            'corrupted_files': [],
+            'skipped_files': [],
+            'processing_errors': {},
             'point_cloud_files': {'train': [], 'val': []},
             'signed_distance_files': {'train': [], 'val': []},
             'total_points_generated': 0,
@@ -124,32 +127,49 @@ class CDataProcessor:
         print(f"Processing {len(train_files)} training files...")
         for mesh_path in train_files:
             result = self._process_single_mesh(mesh_path, 'train')
-            if result is not None:  # Only add if processing succeeded
+            if result is not None:
                 processing_results['processed_files'].append(result['mesh_name'])
                 processing_results['train_files'].append(result['mesh_name'])
                 processing_results['point_cloud_files']['train'].append(result['points_file'])
                 processing_results['signed_distance_files']['train'].append(result['distances_file'])
                 processing_results['total_points_generated'] += result['num_points']
+            else:
+                # Track failed files
+                mesh_name = os.path.splitext(os.path.basename(mesh_path))[0]
+                processing_results['corrupted_files'].append(mesh_name)
+                processing_results['skipped_files'].append(f"{mesh_name} (train)")
         
         # Process validation files
         print(f"Processing {len(val_files)} validation files...")
         for mesh_path in val_files:
             result = self._process_single_mesh(mesh_path, 'val')
-            if result is not None:  # Only add if processing succeeded
+            if result is not None:
                 processing_results['processed_files'].append(result['mesh_name'])
                 processing_results['val_files'].append(result['mesh_name'])
                 processing_results['point_cloud_files']['val'].append(result['points_file'])
                 processing_results['signed_distance_files']['val'].append(result['distances_file'])
                 processing_results['total_points_generated'] += result['num_points']
+            else:
+                # Track failed files
+                mesh_name = os.path.splitext(os.path.basename(mesh_path))[0]
+                processing_results['corrupted_files'].append(mesh_name)
+                processing_results['skipped_files'].append(f"{mesh_name} (val)")
         
         # Update counts to reflect actual processed files
         processing_results['train_count'] = len(processing_results['train_files'])
         processing_results['val_count'] = len(processing_results['val_files'])
+        processing_results['success_rate'] = len(processing_results['processed_files']) / len(mesh_paths)
         
+        # Summary logging
         print(f"Data processing complete.")
+        print(f"  Successfully processed: {len(processing_results['processed_files'])} files")
         print(f"  Train: {processing_results['train_count']} files")
         print(f"  Val: {processing_results['val_count']} files")
         print(f"  Total points: {processing_results['total_points_generated']}")
+        
+        if processing_results['corrupted_files']:
+            print(f"  ⚠️  Corrupted/skipped: {len(processing_results['corrupted_files'])} files")
+            print(f"  Success rate: {processing_results['success_rate']:.1%}")
         
         return processing_results
 
