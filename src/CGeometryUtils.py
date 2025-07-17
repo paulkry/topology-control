@@ -4,9 +4,7 @@ import numpy as np
 import meshio as meshio
 import polyscope as ps
 from pathlib import Path
-from pysdf import SDF
 import igl
-from torch.utils.data import Dataset
 
 """
    Functions for visualization and processing of meshes
