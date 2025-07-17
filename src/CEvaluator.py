@@ -5,11 +5,11 @@ import torch
 import numpy as np
 import skimage.measure
 from torch.utils.data import DataLoader
-from CModelTrainer import SDFDataset
-from CGeometryUtils import VolumeProcessor
+from src.CModelTrainer import SDFDataset
+from src.CGeometryUtils import VolumeProcessor
 
 class CEvaluator:
-    def __init__(self, model, device='cpu'):
+    def __init__(self, eval_config, processor_config):
         """
         Initialize the evaluator with a trained SDF model.
         
@@ -17,12 +17,10 @@ class CEvaluator:
             model: Trained SDF model (e.g., DeepSDF)
             device: Device to run evaluation on ('cpu' or 'cuda')
         """
-        self.model = model
-        self.device = device
-        self.model.to(self.device)
-        self.model.eval()
+        self.processor_config = processor_config
+        self.config = eval_config
 
-    def evaluate_sdf_dataset(self, dataset_info, batch_size=16, resolution=50):
+    def evaluate_sdf_dataset(self, model, dataset_info, batch_size=16, resolution=50):
         """
         Evaluate the SDF model on a test dataset and extract meshes.
         
@@ -34,6 +32,12 @@ class CEvaluator:
         Returns:
             dict: Evaluation results including losses and extracted meshes
         """
+        self.model = model
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.model.to(self.device)
+        self.model.eval()
+
+        print(f"Using device: {self.device}")
         # Create test dataset (equivalent to ds_test from notebook)
         test_dataset = SDFDataset(dataset_info, split='val', fix_seed=True)
         test_loader = DataLoader(
