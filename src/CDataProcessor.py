@@ -119,30 +119,38 @@ class CDataProcessor:
             }
         }
         
+            
         # Process training files
         print(f"Processing {len(train_files)} training files...")
         for mesh_path in train_files:
             result = self._process_single_mesh(mesh_path, 'train')
-            processing_results['processed_files'].append(result['mesh_name'])
-            processing_results['train_files'].append(result['mesh_name'])
-            processing_results['point_cloud_files']['train'].append(result['points_file'])
-            processing_results['signed_distance_files']['train'].append(result['distances_file'])
-            processing_results['total_points_generated'] += result['num_points']
+            if result is not None:  # Only add if processing succeeded
+                processing_results['processed_files'].append(result['mesh_name'])
+                processing_results['train_files'].append(result['mesh_name'])
+                processing_results['point_cloud_files']['train'].append(result['points_file'])
+                processing_results['signed_distance_files']['train'].append(result['distances_file'])
+                processing_results['total_points_generated'] += result['num_points']
         
         # Process validation files
         print(f"Processing {len(val_files)} validation files...")
         for mesh_path in val_files:
             result = self._process_single_mesh(mesh_path, 'val')
-            processing_results['processed_files'].append(result['mesh_name'])
-            processing_results['val_files'].append(result['mesh_name'])
-            processing_results['point_cloud_files']['val'].append(result['points_file'])
-            processing_results['signed_distance_files']['val'].append(result['distances_file'])
-            processing_results['total_points_generated'] += result['num_points']
+            if result is not None:  # Only add if processing succeeded
+                processing_results['processed_files'].append(result['mesh_name'])
+                processing_results['val_files'].append(result['mesh_name'])
+                processing_results['point_cloud_files']['val'].append(result['points_file'])
+                processing_results['signed_distance_files']['val'].append(result['distances_file'])
+                processing_results['total_points_generated'] += result['num_points']
+        
+        # Update counts to reflect actual processed files
+        processing_results['train_count'] = len(processing_results['train_files'])
+        processing_results['val_count'] = len(processing_results['val_files'])
         
         print(f"Data processing complete.")
         print(f"  Train: {processing_results['train_count']} files")
         print(f"  Val: {processing_results['val_count']} files")
         print(f"  Total points: {processing_results['total_points_generated']}")
+        
         return processing_results
 
     def _discover_mesh_files(self):
@@ -222,9 +230,21 @@ class CDataProcessor:
         Returns:
             dict: Results for this specific mesh
         """
-        # Load and normalize mesh using PointCloudProcessor method
-        vertices, faces, name = self.point_cloud_processor.load_mesh(mesh_path)
-        
+        try:
+            # Load and normalize mesh using PointCloudProcessor method
+            vertices, faces, name = self.point_cloud_processor.load_mesh(mesh_path)
+        except ValueError as e:
+            if "len(points)" in str(e) and "point_data" in str(e):
+                print(f"  [{split.upper()}] [CORRUPTED] Skipping corrupted mesh file: {os.path.basename(mesh_path)}")
+                print(f"    Error: {e}")
+                return None
+            else:
+                # Re-raise if it's a different error
+                raise
+        except Exception as e:
+            print(f"  [{split.upper()}] [ERROR] Failed to load mesh: {os.path.basename(mesh_path)}")
+            print(f"    Error: {e}")
+            return None
         
         # Determine output directory based on split
         if split == 'train':
