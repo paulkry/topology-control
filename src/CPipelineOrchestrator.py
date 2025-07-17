@@ -258,7 +258,7 @@ class CPipelineOrchestrator:
         summary = {
             'pipeline_completed': True,
             'steps_completed': [
-                'data_processing' if 'data' in state else 'skipped',
+                'data_processing' if 'processing_report' in state else 'skipped',
                 'model_building' if 'model' in state else 'skipped', 
                 'training' if 'trained_model' in state else 'skipped',
                 'evaluation' if 'evaluation_results' in state else 'skipped'
