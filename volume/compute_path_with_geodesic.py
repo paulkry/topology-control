@@ -1,9 +1,9 @@
 def compute_path(latent_A, latent_B, model, n_steps=100):
-    # Original pathfinding logic here
+    # Original pathfinding logic 
     pass
 
 def compute_path2(latent_A, latent_B, model, n_steps=100):
-    # Alternative pathfinding logic here
+    # Alternative pathfinding logic 
     pass
 
 # --------------------------------------
