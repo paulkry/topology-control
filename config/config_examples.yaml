@@ -1,4 +1,4 @@
-home: &home_path /homes/dnogina/code/topology-control # all other paths are relative to home
+home: &home_path ... # all other paths are relative to home
 
 artifacts_config:
   save_artifacts_to: artifacts 

@@ -365,7 +365,6 @@ class CPipelineOrchestrator:
 
     def _log_processing_summary(self, results):
         """Log a detailed summary of data processing results."""
-        print("results", results)
         print("\n📊 Data Processing Summary:")
         print(f"  Total files processed: {len(results['processed_files'])}")
         print(f"  Train files: {results['train_count']}")
