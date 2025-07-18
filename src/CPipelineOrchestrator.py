@@ -20,17 +20,29 @@ import os
 import traceback
 
 class CPipelineOrchestrator:
-    def __init__(self, config_file="config/config.yaml"):
+    def __init__(self, config_file="config/config_examples.yaml"):
         self.config = self._load_config(config_file)
         self._current_step = None
         
-        # Initialize pipeline components
+        # Initialize artifact manager first to get experiment info
+        self.artifact_manager = CArtifactManager(self.config["artifacts_config"])
+        
+        # Get experiment info for component integration
+        experiment_summary = self.artifact_manager.get_experiment_summary()
+        experiment_id = experiment_summary['experiment_id']
+        artifacts_base = self.config["artifacts_config"]["save_artifacts_to"]
+        
+        # Initialize pipeline components with experiment integration
         self.architecture_manager = CArchitectureManager(self.config["model_config"])
         self.data_processor = CDataProcessor(self.config["processor_config"])
-        self.model_trainer = CModelTrainer(self.config["trainer_config"])
+        
+        # Pass experiment info to trainer for integrated artifact saving
+        trainer_config = self.config["trainer_config"].copy()
+        trainer_config['experiment_id'] = experiment_id
+        trainer_config['artifacts_base'] = artifacts_base
+        self.model_trainer = CModelTrainer(trainer_config)
+        
         self.evaluator = CEvaluator(self.config["evaluator_config"], self.config["processor_config"])
-        self.artifact_manager = CArtifactManager(self.config["artifacts_config"])
-
 
     def run(self):
         """Execute the complete ML pipeline: Data → Model → Training → Evaluation."""
@@ -52,8 +64,8 @@ class CPipelineOrchestrator:
             self._train_model_step(pipeline_state)
             
             # # Step 4: Evaluation
-            # self._current_step = 'evaluation'
-            # self._evaluate_model_step(pipeline_state)
+            self._current_step = 'evaluation'
+            self._evaluate_model_step(pipeline_state)
             
             # Save final summary
             self._save_pipeline_summary(pipeline_state)
@@ -133,13 +145,44 @@ class CPipelineOrchestrator:
             return
         
         print("🔄 Step 1: Processing Data...")
-        processing_results = self.data_processor.process()
+        
+        # Check if we're using SDF dataset type from trainer config
+        trainer_config = self.config.get('trainer_config', {})
+        dataset_type = trainer_config.get('dataset_type', 'shape')
+        
+        if dataset_type == 'sdf':
+            # For SDF datasets, generate SDF dataset with proper dataset_info
+            print("   Generating SDF dataset...")
+            
+            # Get SDF parameters from config
+            z_dim = self.config.get('model_config', {}).get('z_dim', 32)
+            latent_mean = trainer_config.get('latent_mean', 0.0)
+            latent_sd = trainer_config.get('latent_sd', 0.01)
+            
+            processing_results = self.data_processor.generate_sdf_dataset(
+                z_dim=z_dim,
+                latent_mean=latent_mean,
+                latent_sd=latent_sd
+            )
+        else:
+            # For traditional datasets, use standard processing
+            print("   Processing traditional dataset...")
+            processing_results = self.data_processor.process()
+        
         state["processing_report"] = processing_results
         
         if processing_results:
             self.artifact_manager.save_artifacts(
                 data_processing_results=processing_results
             )
+        
+        # Debug: Check if dataset_info is available
+        if isinstance(processing_results, dict) and 'dataset_info' in processing_results:
+            print(f"   ✅ Dataset info generated with {len(processing_results['dataset_info']['train_files'])} train files")
+            print(f"   ✅ Dataset info generated with {len(processing_results['dataset_info']['val_files'])} val files")
+        else:
+            print("   ⚠️  No dataset_info in processing results")
+        
         print("✅ Step 1: Data Processing Complete")
 
     def _build_model_step(self, state):
@@ -182,8 +225,12 @@ class CPipelineOrchestrator:
         if not model:
             raise ValueError("No model found. Model building step must be completed first.")
         
-        # Train the model
-        training_results = self.model_trainer.train_and_validate(model)
+        # Get dataset info if available from data processing step
+        processing_report = state.get("processing_report")
+        dataset_info = processing_report.get('dataset_info')
+        
+        # Train the model (CModelTrainer will save detailed artifacts automatically)
+        training_results = self.model_trainer.train_and_validate(model, dataset_info)
         
         # Handle different return formats from trainer
         if isinstance(training_results, tuple) and len(training_results) == 2:
@@ -195,25 +242,37 @@ class CPipelineOrchestrator:
         state["trained_model"] = trained_model
         state["training_results"] = training_report
         
-        # Save the trained model using artifact manager
-        trainer_config = self.config.get('trainer_config', {})
+        # Save a basic model copy via artifact manager for compatibility
         if trainer_config.get('save_model', True):
             model_metadata = {
                 'best_val_loss': training_report.get('best_val_loss', float('inf')),
                 'total_epochs': training_report.get('total_epochs', 0),
                 'final_train_loss': training_report.get('final_train_loss', 0),
-                'final_val_loss': training_report.get('final_val_loss', 0)
+                'final_val_loss': training_report.get('final_val_loss', 0),
+                'experiment_id': training_report.get('experiment_id'),
+                'training_artifacts_location': training_report.get('run_directory')  # Link to detailed artifacts
             }
             model_path = self.artifact_manager.save_model(trained_model, "trained_model", model_metadata)
             if model_path:
                 training_report["model_saved_path"] = model_path
                 training_report["model_filename"] = os.path.basename(model_path)
         
-        # Save training artifacts
+        # Save training summary via artifact manager
         self.artifact_manager.save_artifacts(
             training_results=training_report
         )
-        print("✅ Step 3: Model Training Complete")
+        
+        # Log detailed artifact locations
+        if 'training_artifacts' in training_report:
+            artifacts = training_report['training_artifacts']
+            print("✅ Step 3: Model Training Complete")
+            print(f"📁 Training artifacts saved to: {training_report.get('run_directory', 'N/A')}")
+            print(f"   📄 Best model: {os.path.basename(artifacts.get('best_model_path', 'N/A'))}")
+            print(f"   📄 Final model: {os.path.basename(artifacts.get('final_model_path', 'N/A'))}")
+            print(f"   📄 Latest checkpoint: {os.path.basename(artifacts.get('latest_checkpoint_path', 'N/A'))}")
+            print(f"   📄 Training summary: {os.path.basename(artifacts.get('training_summary_path', 'N/A'))}")
+        else:
+            print("✅ Step 3: Model Training Complete")
 
     def _load_pretrained_model(self, state):
         """Load a pre-trained model for evaluation."""
@@ -243,8 +302,14 @@ class CPipelineOrchestrator:
         if not trained_model:
             raise ValueError("No trained model found. Training step must be completed first.")
         
+        # Get dataset info for evaluation if available
+        processing_report = state.get("processing_report")
+        dataset_info = None
+        if processing_report and isinstance(processing_report, dict):
+            dataset_info = processing_report.get('dataset_info')
+        
         # Run evaluation
-        evaluation_results = self.evaluator.evaluate(trained_model)
+        evaluation_results = self.evaluator.evaluate(trained_model, dataset_info)
         state["evaluation_results"] = evaluation_results
         
         # Save evaluation results
@@ -255,15 +320,41 @@ class CPipelineOrchestrator:
 
     def _save_pipeline_summary(self, state):
         """Save a summary of the entire pipeline execution."""
+        # Get final artifact locations
+        training_results = state.get("training_results", {})
+        artifact_locations = {}
+        
+        if 'training_artifacts' in training_results:
+            artifact_locations = training_results['training_artifacts']
+        
         summary = {
             'pipeline_completed': True,
             'steps_completed': [
-                'data_processing' if 'data' in state else 'skipped',
+                'data_processing' if 'processing_report' in state else 'skipped',
                 'model_building' if 'model' in state else 'skipped', 
                 'training' if 'trained_model' in state else 'skipped',
                 'evaluation' if 'evaluation_results' in state else 'skipped'
             ],
-            'artifacts_generated': list(state.keys())
+            'artifacts_generated': list(state.keys()),
+            'experiment_summary': {
+                'experiment_id': training_results.get('experiment_id'),
+                'best_val_loss': training_results.get('best_val_loss'),
+                'total_epochs': training_results.get('total_epochs'),
+                'total_training_time': training_results.get('total_training_time'),
+                'detailed_artifacts_location': training_results.get('run_directory')
+            },
+            'key_artifacts': artifact_locations
         }
+        
         self.artifact_manager.save_artifacts(pipeline_summary=summary)
         print(f"📋 Pipeline Summary: {', '.join(summary['steps_completed'])}")
+        
+        # Print final experiment summary
+        if training_results.get('experiment_id'):
+            print(f"\n📊 Experiment {training_results['experiment_id']} Summary:")
+            if training_results.get('best_val_loss'):
+                print(f"   Best validation loss: {training_results['best_val_loss']:.6f}")
+            if training_results.get('total_epochs'):
+                print(f"   Total epochs: {training_results['total_epochs']}")
+            if training_results.get('total_training_time'):
+                print(f"   Training time: {training_results['total_training_time']:.1f}s")

@@ -164,62 +164,62 @@ class DeepSDF(nn.Module):
             nn.Dropout(self.dropout_p)
         )
 
-    def forward(self, x=None, latent_vec=None, coords=None):
+    def forward(self, latent_vec, coords):
         """
-        Forward pass - supports both unified input and separate inputs.
+        Forward pass for DeepSDF - simplified and robust.
         
         Args:
-            x: Unified input tensor of shape [batch_size, z_dim + 3] (alternative interface)
-            latent_vec: Latent vector of shape [batch_size, z_dim] (DeepSDF interface)
-            coords: Coordinates of shape [batch_size, num_coords, 3] (DeepSDF interface)
+            latent_vec: Latent vector of shape [batch_size, z_dim]
+            coords: Coordinates of shape [batch_size, num_coords, 3]
             
         Returns:
-            torch.Tensor: SDF values
+            torch.Tensor: SDF values of shape [batch_size, num_coords]
         """
-        if x is not None:
-            # Unified interface (like SimpleMLP)
-            # Ensure input is the right shape
-            if x.dim() == 1:
-                x = x.unsqueeze(0)  # Add batch dimension if missing
-            
-            # If input is 2D [batch_size, features] treat as single point
-            if x.dim() == 2:
-                # Add coordinate dimension: [batch_size, 1, features]
-                x = x.unsqueeze(1)
-            
-            # Split into latent and coords
-            latent_vec = x[:, :, :self.z_dim]  # [batch_size, num_coords, z_dim]
-            coords = x[:, :, self.z_dim:]      # [batch_size, num_coords, 3]
-            
-        elif latent_vec is not None and coords is not None:
-            # DeepSDF interface is latent_vec: [batch_size, z_dim] and coords: [batch_size, num_coords, 3]
-            
-            # Expand latent vector to match coordinate dimensions
-            latent_vec = latent_vec.unsqueeze(1).repeat(1, coords.shape[1], 1)
-        else:
-            raise ValueError("Must provide either 'x' or both 'latent_vec' and 'coords'")
+        # Validate input shapes
+        if latent_vec.dim() != 2:
+            raise ValueError(f"latent_vec must be 2D [batch_size, z_dim], got shape {latent_vec.shape}")
+        if coords.dim() != 3:
+            raise ValueError(f"coords must be 3D [batch_size, num_coords, 3], got shape {coords.shape}")
         
-        # Concatenate latent and coordinates
-        x = torch.cat([latent_vec, coords], dim=-1)
-        skip_x = x
-
-        x = self.input_layer(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
-        x = self.layer5(torch.cat([x, skip_x], dim=-1))  # skip connection
-        x = self.layer6(x)
-        x = self.layer7(x)
-        x = self.layer8(x)
-
-        # Return SDF values
-        result = x.squeeze(-1).tanh()
+        batch_size, num_coords, coord_dim = coords.shape
+        z_dim = latent_vec.shape[1]
         
-        # If input was 2D (single point), return 2D output
-        if result.dim() == 3 and result.shape[1] == 1:
-            result = result.squeeze(1)
-            
-        return result
+        # Expand latent vector to match number of coordinates
+        # [batch_size, z_dim] -> [batch_size, num_coords, z_dim]
+        latent_expanded = latent_vec.unsqueeze(1).expand(batch_size, num_coords, z_dim)
+        
+        # Concatenate latent vector and coordinates
+        # [batch_size, z_dim + 3]
+        x = torch.cat([latent_expanded, coords], dim=-1)
+        
+        # Store for skip connection
+        skip_x = x  # [batch_size, num_coords, z_dim + 3]
+        
+        # Reshape for processing through linear layers
+        # [batch_size * num_coords, z_dim + 3]
+        original_shape = x.shape
+        x = x.view(-1, x.shape[-1])
+        skip_x_flat = skip_x.view(-1, skip_x.shape[-1])
+        
+        # Forward pass through network
+        x = self.input_layer(x)                                    # [batch*coords, layer_size]
+        x = self.layer2(x)                                         # [batch*coords, layer_size]
+        x = self.layer3(x)                                         # [batch*coords, layer_size]
+        x = self.layer4(x)                                         # [batch*coords, layer_size - input_dim]
+        
+        # Skip connection: concatenate with original input
+        x = self.layer5(torch.cat([x, skip_x_flat], dim=-1))     # [batch*coords, layer_size]
+        x = self.layer6(x)                                         # [batch*coords, layer_size]
+        x = self.layer7(x)                                         # [batch*coords, layer_size]
+        x = self.layer8(x)                                         # [batch*coords, 1]
+        
+        # Reshape back to original batch structure
+        # [batch*coords, 1] -> [batch_size, num_coords, 1] -> [batch_size, num_coords]
+        x = x.view(original_shape[0], original_shape[1], -1)
+        x = x.squeeze(-1)
+        
+        # Apply tanh activation to bound SDF values
+        return x.tanh()
     
     def get_architecture_info(self):
         """Get information about the network architecture."""
