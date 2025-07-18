@@ -49,7 +49,7 @@ class CEvaluator:
         # Get volume coordinates (equivalent to all_coords, grad_size_axis from notebook)
         volume_processor = VolumeProcessor(device='cpu', resolution=self.resolution)
         all_coords = volume_processor._get_volume_coords(device='cpu', resolution=self.resolution)[0]
-        grid_values = torch.arange(-1, 1, float(2/self.resolution))
+        grid_values = torch.arange(-1, 1, float(1/self.resolution))
         grad_size_axis = grid_values.shape[0]
         
         evaluation_results = {
@@ -96,7 +96,8 @@ class CEvaluator:
                 all_coords = all_coords.to(self.device)
                 
                 # Predict full SDF volume
-                pred_full_sdfs = self.model(latent_vec.unsqueeze(0), all_coords.unsqueeze(0))
+                with torch.no_grad():
+                    pred_full_sdfs = self.model(latent_vec.unsqueeze(0), all_coords.unsqueeze(0))
                 pred_full_sdfs = pred_full_sdfs.squeeze()
                 
                 # Store statistics
@@ -107,7 +108,7 @@ class CEvaluator:
                 
                 # Extract mesh (equivalent to vertices_pred, faces_pred from notebook)
                 try:
-                    vertices, faces = self.extract_mesh(grad_size_axis, pred_full_sdfs)
+                    vertices, faces = self.extract_mesh(grad_size_axis, pred_full_sdfs.unsqueeze(0))
                     
                     evaluation_results['extracted_meshes'].append({
                         'sample_idx': sample_idx,
