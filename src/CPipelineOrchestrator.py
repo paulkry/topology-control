@@ -366,9 +366,8 @@ class CPipelineOrchestrator:
     def _log_processing_summary(self, results):
         """Log a detailed summary of data processing results."""
         print("\n📊 Data Processing Summary:")
-        print(f"  Total files processed: {len(results['processed_files'])}")
-        print(f"  Train files: {results['train_count']}")
-        print(f"  Val files: {results['val_count']}")
+        print(f"  Train files: {len(results['train_files'])}")
+        print(f"  Val files: {len(results['val_files'])}")
         print(f"  Total points generated: {results['total_points_generated']:,}")
         
         if results.get('corrupted_files'):
