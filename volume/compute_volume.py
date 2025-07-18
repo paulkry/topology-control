@@ -8,7 +8,7 @@ import torch
 import os
 
 from sdfs import SDF_interpolator
-from config import DEV
+from config import DEV, VOLUME_DIR
 
 
 
@@ -100,7 +100,7 @@ def triangle_mesh_to_volume(vertices, faces):
 def generate_latent_volume_data(n, model, latent_dim, latent_sd, latent_mean):
     latents = torch.randn(n, latent_dim)
     latents = (latents * latent_sd) + latent_mean
-    data_dir = "data/processed/train"
+    data_dir = os.path.join(os.path.dirname(VOLUME_DIR), "data", "processed", "train") #"data/processed/train"
 
     volumes = []
 
@@ -113,7 +113,7 @@ def generate_latent_volume_data(n, model, latent_dim, latent_sd, latent_mean):
     
 
 def generate_syn_latent_volume_data(num_samples):
-    data_dir = "data/"
+    data_dir = os.path.join(VOLUME_DIR, "data") # volume/data
     interpolator = SDF_interpolator()
     # will be passing coords around to avoid recomputation
     coords, grid_size = get_volume_coords(resolution=50)
@@ -153,5 +153,5 @@ if __name__ == "__main__":
     #----------------------------------------------------------------
     # Synthetic Data Generation
 
-    generate_syn_latent_volume_data(10000)
+    generate_syn_latent_volume_data(200)
     

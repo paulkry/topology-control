@@ -5,3 +5,5 @@ numpy>=1.21.0,<2.0.0
 libigl~=2.5.4.dev0
 matplotlib>=3.5.0
 pyyaml>=6.0
+pysdf
+scikit-image

@@ -8,11 +8,11 @@ import torch
 
 from dataset import VolumeDataset
 from model import Latent2Volume
-from config import LATENT_DIM, DEV, BATCH_SIZE, LR, EPOCHS
+from config import LATENT_DIM, DEV, BATCH_SIZE, LR, EPOCHS, VOLUME_DIR
 
 if __name__ == "__main__":
     dataset = VolumeDataset(
-        dataset_path="data/processed/volume",
+        dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")  # Path to the dataset file,
     )
 
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
@@ -39,8 +39,8 @@ if __name__ == "__main__":
         if avg_loss < best_loss:
             best_loss = avg_loss
 
-            os.makedirs("checkpoints", exist_ok=True)
+            os.makedirs(os.path.join(VOLUME_DIR, "checkpoints"), exist_ok=True)
             torch.save({
                 "model_state_dict": model.state_dict(),
-            }, "checkpoints/deepsdf_best.pt")
+            }, os.path.join(VOLUME_DIR, "checkpoints", "latent2volume_best.pt"))
             print(f"Best model saved at epoch {e+1} with loss {best_loss:.6f}")

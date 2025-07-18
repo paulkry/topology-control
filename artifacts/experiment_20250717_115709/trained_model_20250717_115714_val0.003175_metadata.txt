@@ -1,0 +1,11 @@
+Artifact: trained_model_20250717_115714_val0.003175_metadata
+Generated: 2025-07-17 11:57:14
+Experiment: 20250717_115709
+==================================================
+
+{
+  "best_val_loss": 0.003175197634845972,
+  "total_epochs": 20,
+  "final_train_loss": 0.0018756706267595291,
+  "final_val_loss": 0.003384882351383567
+}

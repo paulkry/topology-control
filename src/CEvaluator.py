@@ -9,57 +9,18 @@ from src.CModelTrainer import SDFDataset
 from src.CGeometryUtils import VolumeProcessor
 
 class CEvaluator:
-    def __init__(self, evaluator_config, processor_config=None):
+    def __init__(self, eval_config, processor_config):
         """
-        Initialize the evaluator with configuration.
+        Initialize the evaluator with a trained SDF model.
         
         Parameters:
-            evaluator_config: Configuration dict for evaluation
-            processor_config: Configuration dict for data processing (optional)
+            model: Trained SDF model (e.g., DeepSDF)
+            device: Device to run evaluation on ('cpu' or 'cuda')
         """
-        self.config = evaluator_config
-        self.processor_config = processor_config or {}
-        
-        # Extract evaluation parameters
-        self.device = self.config.get('device', 'cpu')
-        self.batch_size = self.config.get('batch_size', 16)
-        self.resolution = self.config.get('resolution', 50)
-        self.skip_evaluation = self.config.get('skip_evaluation', False)
-        
-        # Model will be set during evaluation
-        self.model = None
-        
-        print(f"CEvaluator initialized - Device: {self.device}, Resolution: {self.resolution}")
+        self.processor_config = processor_config
+        self.config = eval_config
 
-    def evaluate(self, trained_model, dataset_info=None):
-        """
-        Main evaluation method that accepts the trained model.
-        
-        Parameters:
-            trained_model: Trained PyTorch model to evaluate
-            dataset_info: Dataset info from CDataProcessor (required for meaningful evaluation)
-            
-        Returns:
-            dict: Evaluation results
-        """
-        if self.skip_evaluation:
-            print("📊 Evaluation skipped (skip_evaluation=True)")
-            return {"status": "skipped", "reason": "skip_evaluation flag set"}
-        
-        if not dataset_info:
-            print("❌ Error: dataset_info is required for SDF model evaluation")
-            return {"status": "error", "reason": "dataset_info is required"}
-        
-        # Set the model for this evaluation
-        self.model = trained_model
-        self.model.to(self.device)
-        self.model.eval()
-        
-        print(f"🔍 Starting SDF evaluation with {self.model.__class__.__name__}")
-        
-        return self.evaluate_sdf_dataset(dataset_info)
-
-    def evaluate_sdf_dataset(self, dataset_info):
+    def evaluate_sdf_dataset(self, model, dataset_info, batch_size=16, resolution=50):
         """
         Evaluate the SDF model on a test dataset and extract meshes.
         
@@ -69,8 +30,12 @@ class CEvaluator:
         Returns:
             dict: Evaluation results including losses and extracted meshes
         """
-        print(f"🎯 Evaluating SDF model on dataset...")
-        
+        self.model = model
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.model.to(self.device)
+        self.model.eval()
+
+        print(f"Using device: {self.device}")
         # Create test dataset (equivalent to ds_test from notebook)
         test_dataset = SDFDataset(dataset_info, split='val', fix_seed=True)
         test_loader = DataLoader(
