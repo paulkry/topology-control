@@ -172,7 +172,7 @@ class CPipelineOrchestrator:
         state["processing_report"] = processing_results
         
         if processing_results:
-            self._log_processing_summary(processing_results)
+            self._log_processing_summary(processing_results['processing_results'])
         
             self.artifact_manager.save_artifacts(
                 data_processing_results=processing_results
@@ -311,7 +311,7 @@ class CPipelineOrchestrator:
             dataset_info = processing_report.get('dataset_info')
         
         # Run evaluation
-        evaluation_results = self.evaluator.evaluate(trained_model, dataset_info)
+        evaluation_results = self.evaluator.evaluate_sdf_dataset(trained_model, dataset_info)
         state["evaluation_results"] = evaluation_results
         
         # Save evaluation results
@@ -365,6 +365,7 @@ class CPipelineOrchestrator:
 
     def _log_processing_summary(self, results):
         """Log a detailed summary of data processing results."""
+        print("results", results)
         print("\n📊 Data Processing Summary:")
         print(f"  Total files processed: {len(results['processed_files'])}")
         print(f"  Train files: {results['train_count']}")

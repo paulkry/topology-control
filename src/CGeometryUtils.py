@@ -58,7 +58,7 @@ class PointCloudProcessor:
         self.data_dir = data_dir
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
-        self.renderer = MeshRenderer()
+        # self.renderer = MeshRenderer()
     
     def load_mesh(self, mesh_file):
         """Load and normalize mesh"""
@@ -140,7 +140,7 @@ class PointCloudProcessor:
                 np.save(distances_file, distances)
             
             # Visualize on Polyscope
-            self.renderer.render_mesh_with_points(vertices, faces, sampled_points, distances, name, f"{name}_points")
+            # self.renderer.render_mesh_with_points(vertices, faces, sampled_points, distances, name, f"{name}_points")
         
         self.renderer.show()
     

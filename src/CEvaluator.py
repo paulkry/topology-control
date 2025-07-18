@@ -40,15 +40,15 @@ class CEvaluator:
         test_dataset = SDFDataset(dataset_info, split='val', fix_seed=True)
         test_loader = DataLoader(
             test_dataset, 
-            batch_size=self.batch_size, 
+            batch_size=batch_size, 
             shuffle=False,  # Reproducible evaluation
             collate_fn=test_dataset.collate_fn
         )
         
         # Get volume coordinates (equivalent to all_coords, grad_size_axis from notebook)
-        volume_processor = VolumeProcessor(device='cpu', resolution=self.resolution)
-        all_coords = volume_processor._get_volume_coords(device='cpu', resolution=self.resolution)[0]
-        grid_values = torch.arange(-1, 1, float(2/self.resolution))
+        volume_processor = VolumeProcessor(device='cpu', resolution=resolution)
+        all_coords = volume_processor._get_volume_coords(device='cpu', resolution=resolution)[0]
+        grid_values = torch.arange(-1, 1, float(2/resolution))
         grad_size_axis = grid_values.shape[0]
         
         evaluation_results = {
@@ -56,7 +56,7 @@ class CEvaluator:
             'test_losses': [],
             'extracted_meshes': [],
             'sdf_statistics': {'min_values': [], 'max_values': []},
-            'resolution': self.resolution,
+            'resolution': resolution,
             'num_samples': len(test_dataset),
             'device': self.device
         }
