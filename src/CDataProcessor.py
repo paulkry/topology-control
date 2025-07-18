@@ -325,7 +325,7 @@ class CDataProcessor:
             latent_sd (float): Standard deviation for latent vector initialization
             
         Returns:
-            dict: Dataset information for SDF training
+            dict: Processing report containing dataset_info for SDF training
         """
         # First ensure data is processed
         processing_results = self.process()
@@ -337,11 +337,22 @@ class CDataProcessor:
         # Get volume coordinates from VolumeProcessor
         volume_coords = self.volume_processor._get_volume_coords(device=device, resolution=resolution)
         
-        # Create dataset metadata
+        # Convert volume_coords tensor to numpy array (JSON serializable)
+        if hasattr(volume_coords, 'numpy'):
+            volume_coords_array = volume_coords.cpu().numpy()
+        elif hasattr(volume_coords, 'detach'):
+            volume_coords_array = volume_coords.detach().cpu().numpy()
+        elif isinstance(volume_coords, np.ndarray):
+            volume_coords_array = volume_coords
+        else:
+            # Fallback - convert to list
+            volume_coords_array = np.array(volume_coords.tolist()) if hasattr(volume_coords, 'tolist') else None
+        
+        # Create dataset metadata - only use serializable formats
         dataset_info = {
             'train_files': [],
             'val_files': [],
-            'volume_coords': volume_coords,
+            'volume_coords': volume_coords_array,  # Use numpy array instead of tensor
             'dataset_params': {
                 'z_dim': z_dim,
                 'latent_mean': latent_mean,
@@ -382,8 +393,18 @@ class CDataProcessor:
         print(f"  Val files: {len(dataset_info['val_files'])}")
         print(f"  Total points: {processing_results['total_points_generated']}")
         print(f"  Volume resolution: {self.resolution}³")
+        print(f"  Volume coords shape: {volume_coords_array.shape if volume_coords_array is not None else 'None'}")
         
-        return dataset_info
+        # Return in the format expected by the pipeline orchestrator
+        return {
+            'status': 'success',
+            'dataset_info': dataset_info,  # ← Now fully JSON serializable
+            'processed_data_path': self.processed_data_path,
+            'train_files': dataset_info['train_files'],
+            'val_files': dataset_info['val_files'],
+            'processing_results': processing_results,
+            'total_points_generated': processing_results['total_points_generated']
+    }
     
 
     
