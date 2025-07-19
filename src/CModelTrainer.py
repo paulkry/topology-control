@@ -173,7 +173,8 @@ class CModelTrainer:
         self.loss_function = config.get('loss_function', 'mse')
         self.epochs = config.get('num_epochs', 10)
         self.batch_size = config.get('batch_size', 32)
-        self.learning_rate = config.get('learning_rate', 1e-3)
+        self.network_learning_rate = config.get('network_learning_rate', 1e-3)
+        self.latent_learning_rate = config.get('latent_learning_rate', 0.01)
         
         # Data paths
         self.processed_data_path = config.get('processed_data_path', 'data/processed')
@@ -385,13 +386,18 @@ class CModelTrainer:
         # Setup loss function and optimizer
         if self.dataset_type == 'sdf':
             criterion = self._get_sdf_loss()
+            
+            # Get latent vectors from dataset for SDF training
+            if hasattr(train_dataset, 'latent_vectors'):
+                latent_vectors = train_dataset.latent_vectors.to(self.device)
+                optimizer = self._get_optimizer(model, latent_vectors)
+                print(f"✓ SDF training setup complete with dual learning rates")
+            else:
+                print("⚠️  No latent vectors found in SDF dataset, using single learning rate")
+                optimizer = self._get_optimizer(model)
+                latent_vectors = None
         else:
             criterion = nn.MSELoss() if self.loss_function.lower() == 'mse' else nn.L1Loss()
-        
-        if self.dataset_type == 'sdf' and hasattr(train_dataset, 'latent_vectors'):
-            optimizer = self._get_optimizer(model, train_dataset.latent_vectors)
-            latent_vectors = train_dataset.latent_vectors
-        else:
             optimizer = self._get_optimizer(model)
             latent_vectors = None
         
@@ -697,19 +703,45 @@ class CModelTrainer:
         return DeepSDFLoss(delta, latent_sd)
     
     def _get_optimizer(self, model, latent_vectors=None):
-        """Get optimizer, optionally including latent vectors."""
-        params = list(model.parameters())
-        if latent_vectors is not None:
-            params.append(latent_vectors)
+        """Get optimizer with separate learning rates for network and latent vectors."""
         
-        if self.optimizer_name.lower() == 'adam':
-            return optim.Adam(params, lr=self.learning_rate)
-        elif self.optimizer_name.lower() == 'adamw':
-            return optim.AdamW(params, lr=self.learning_rate)
-        elif self.optimizer_name.lower() == 'sgd':
-            return optim.SGD(params, lr=self.learning_rate, momentum=0.9)
+        if latent_vectors is not None:
+            # Use separate learning rates for SDF training
+            lr_net = self.config.get('network_learning_rate', 0.001)
+            lr_latent = self.config.get('latent_learning_rate', 0.01)
+            
+            if self.optimizer_name.lower() == 'adam':
+                optimizer = optim.Adam([
+                    {"params": model.parameters(), "lr": lr_net},
+                    {"params": latent_vectors, "lr": lr_latent}
+                ])
+            elif self.optimizer_name.lower() == 'adamw':
+                optimizer = optim.AdamW([
+                    {"params": model.parameters(), "lr": lr_net},
+                    {"params": latent_vectors, "lr": lr_latent}
+                ])
+            else:
+                # Default to Adam for SDF training
+                optimizer = optim.Adam([
+                    {"params": model.parameters(), "lr": lr_net},
+                    {"params": latent_vectors, "lr": lr_latent}
+                ])
+            
+            return optimizer
+        
         else:
-            return optim.Adam(params, lr=self.learning_rate)  # Default
+            # Single learning rate for traditional training
+            params = list(model.parameters())
+            lr = self.learning_rate
+            
+            if self.optimizer_name.lower() == 'adam':
+                return optim.Adam(params, lr=lr)
+            elif self.optimizer_name.lower() == 'adamw':
+                return optim.AdamW(params, lr=lr)
+            elif self.optimizer_name.lower() == 'sgd':
+                return optim.SGD(params, lr=lr, momentum=0.9)
+            else:
+                return optim.Adam(params, lr=lr)  # Default
     
     def _run_epoch(self, data_loader, model, loss_fn, optimizer, is_training, epoch=1):
         """

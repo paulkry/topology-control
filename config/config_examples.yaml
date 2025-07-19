@@ -28,7 +28,7 @@ model_config:
   skip_building: false
   model_name: deepsdf
   # DeepSDF specific parameters matching your notebook
-  z_dim: 32  # Z_DIM = 32 from your notebook
+  z_dim: 16  # Z_DIM = 16 from your notebook
   layer_size: 64  # HIDDEN_DIM = 64 from your notebook
   coord_dim: 3  # 3D coordinates
   dropout_p: 0.2  # Match your notebook's dropout_p = 0.2
@@ -39,9 +39,10 @@ trainer_config:
   dataset_type: sdf  # Important: specify SDF dataset type
   loss_function: deepsdf  # Use custom DeepSDF loss
   optimizer: adam
-  learning_rate: 0.001  # lr=1e-3 from your notebook
+  network_learning_rate: 0.001  # lr=1e-3 from your notebook
+  latent_learning_rate: 0.01
   batch_size: 8  # BATCH_SIZE = 16 from your notebook
-  num_epochs: 40  # max_epochs=20 from your notebook
+  num_epochs: 1000  # max_epochs=20 from your notebook
   max_points: 15000  # Allow more points for better SDF learning
   
   # DeepSDF specific training parameters
@@ -65,6 +66,6 @@ trainer_config:
 evaluator_config:
   skip_evaluation: false
   # Evaluation specific configs for mesh extraction
-  batch_size: 2
+  batch_size: 8
   resolution: 50  # Match training resolution for mesh extraction
   test_data_path: *processed_data_path

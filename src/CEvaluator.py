@@ -37,6 +37,8 @@ class CEvaluator:
         self.resolution = resolution
 
         print(f"Using device: {self.device}")
+        print(f"Evaluation resolution: {resolution}")
+        
         # Create test dataset (equivalent to ds_test from notebook)
         test_dataset = SDFDataset(dataset_info, split='val', fix_seed=True)
         test_loader = DataLoader(
@@ -46,11 +48,13 @@ class CEvaluator:
             collate_fn=test_dataset.collate_fn
         )
         
-        # Get volume coordinates (equivalent to all_coords, grad_size_axis from notebook)
+        # Get volume coordinates - FIX: Use consistent resolution calculation
         volume_processor = VolumeProcessor(device='cpu', resolution=self.resolution)
-        all_coords = volume_processor._get_volume_coords(device='cpu', resolution=self.resolution)[0]
-        grid_values = torch.arange(-1, 1, float(1/self.resolution))
-        grad_size_axis = grid_values.shape[0]
+        all_coords, actual_grid_size = volume_processor._get_volume_coords(device='cpu', resolution=self.resolution)
+        
+        print(f"   Volume coordinates: {all_coords.shape}")
+        print(f"   Actual grid size: {actual_grid_size}")
+        print(f"   Expected volume size: {actual_grid_size ** 3}")
         
         evaluation_results = {
             'evaluation_type': 'sdf_dataset',
@@ -58,6 +62,7 @@ class CEvaluator:
             'extracted_meshes': [],
             'sdf_statistics': {'min_values': [], 'max_values': []},
             'resolution': self.resolution,
+            'actual_grid_size': actual_grid_size,
             'num_samples': len(test_dataset),
             'device': self.device
         }
@@ -91,14 +96,32 @@ class CEvaluator:
             for sample_idx in range(max_samples):
                 coords, latent_vec, true_sdfs = test_dataset[sample_idx]
                 
+                print(f"      Sample {sample_idx}:")
+                print(f"        Latent shape: {latent_vec.shape}")
+                print(f"        Sample coords shape: {coords.shape}")
+                
                 # Get full volume prediction (equivalent to pred_full_sdfs from notebook)
                 latent_vec = latent_vec.to(self.device)
                 all_coords = all_coords.to(self.device)
                 
+                # FIX: Proper model input formatting
+                latent_batch = latent_vec.unsqueeze(0)  # [1, latent_dim]
+                coords_batch = all_coords.unsqueeze(0)  # [1, num_coords, 3]
+                
+                print(f"        Model inputs - latent: {latent_batch.shape}, coords: {coords_batch.shape}")
+                
                 # Predict full SDF volume
-                with torch.no_grad():
-                    pred_full_sdfs = self.model(latent_vec.unsqueeze(0), all_coords.unsqueeze(0))
-                pred_full_sdfs = pred_full_sdfs.squeeze()
+                pred_full_sdfs = self.model(latent_batch, coords_batch)
+                pred_full_sdfs = pred_full_sdfs.squeeze()  # Remove batch dimension
+                
+                print(f"        Model output shape: {pred_full_sdfs.shape}")
+                print(f"        Expected size: {actual_grid_size ** 3}")
+                
+                # Validate tensor size before proceeding
+                if pred_full_sdfs.numel() != actual_grid_size ** 3:
+                    print(f"        ❌ Size mismatch: got {pred_full_sdfs.numel()}, expected {actual_grid_size ** 3}")
+                    print(f"        Skipping sample {sample_idx}")
+                    continue
                 
                 # Store statistics
                 sdf_min = pred_full_sdfs.min().item()
@@ -106,9 +129,12 @@ class CEvaluator:
                 evaluation_results['sdf_statistics']['min_values'].append(sdf_min)
                 evaluation_results['sdf_statistics']['max_values'].append(sdf_max)
                 
+                print(f"        SDF range: [{sdf_min:.4f}, {sdf_max:.4f}]")
+                
                 # Extract mesh (equivalent to vertices_pred, faces_pred from notebook)
                 try:
-                    vertices, faces = self.extract_mesh(grad_size_axis, pred_full_sdfs.unsqueeze(0))
+                    # FIX: Pass the SDF tensor directly, not with unsqueeze
+                    vertices, faces = self.extract_mesh(actual_grid_size, pred_full_sdfs)
                     
                     evaluation_results['extracted_meshes'].append({
                         'sample_idx': sample_idx,
@@ -120,10 +146,15 @@ class CEvaluator:
                         'num_faces': len(faces)
                     })
                     
-                    print(f"      Sample {sample_idx}: {len(vertices)} vertices, {len(faces)} faces")
+                    print(f"        ✅ Mesh extracted: {len(vertices)} vertices, {len(faces)} faces")
+                    
+                    # Visualize the mesh
+                    self.visualize_mesh(vertices, faces, coords.cpu().numpy(), true_sdfs.cpu().numpy(), f"Sample_{sample_idx}")
                     
                 except Exception as e:
-                    print(f"      Sample {sample_idx}: Failed to extract mesh - {e}")
+                    print(f"        ❌ Failed to extract mesh: {e}")
+                    import traceback
+                    print(f"        Traceback: {traceback.format_exc()}")
         
         # Compute final metrics
         evaluation_results['average_test_loss'] = total_loss / num_batches if num_batches > 0 else float('inf')
@@ -143,17 +174,83 @@ class CEvaluator:
     def extract_mesh(self, grad_size_axis, sdf, level=0.0):
         """
         Extract mesh from SDF using marching cubes.
-        This is the same function from the notebook.
         """
-        # Extract zero-level set with marching cubes
-        grid_sdf = sdf.view(grad_size_axis, grad_size_axis, grad_size_axis).detach().cpu().numpy()
-        vertices, faces, normals, _ = skimage.measure.marching_cubes(grid_sdf, level=level)
+        print(f"        extract_mesh: grid_size={grad_size_axis}, sdf_shape={sdf.shape}, sdf_numel={sdf.numel()}")
+        
+        try:
+            # Validate input size
+            expected_size = grad_size_axis ** 3
+            if sdf.numel() != expected_size:
+                raise ValueError(f"SDF size mismatch: got {sdf.numel()}, expected {expected_size} for {grad_size_axis}³ grid")
+            
+            # Check minimum grid size for marching cubes
+            if grad_size_axis < 2:
+                raise ValueError(f"Grid size {grad_size_axis} is too small. Marching cubes requires at least 2x2x2 grid.")
+            
+            # Extract zero-level set with marching cubes
+            grid_sdf = sdf.view(grad_size_axis, grad_size_axis, grad_size_axis).detach().cpu().numpy()
+            print(f"        Grid SDF shape after reshape: {grid_sdf.shape}")
+            print(f"        Grid SDF range: [{grid_sdf.min():.4f}, {grid_sdf.max():.4f}]")
+            
+            # Automatically adjust level if it's outside the SDF range
+            sdf_min, sdf_max = grid_sdf.min(), grid_sdf.max()
+            original_level = level
+            
+            if level < sdf_min or level > sdf_max:
+                if sdf_min < 0 < sdf_max:
+                    level = 0.0
+                    print(f"        Using zero level set (level=0.0)")
+                else:
+                    # Use a level that's within the range, typically the median or a small value
+                    level = np.percentile(grid_sdf, 20)  # 20th percentile often works well
+                    print(f"        Level {original_level} outside range [{sdf_min:.4f}, {sdf_max:.4f}]")
+                    print(f"        Using level={level:.4f} (20th percentile)")
+            
+            vertices, faces, normals, _ = skimage.measure.marching_cubes(grid_sdf, level=level)
+            print(f"        Marching cubes extracted: {len(vertices)} vertices, {len(faces)} faces")
 
-        # Rescale vertices extracted with marching cubes
-        x_max = np.array([1, 1, 1])
-        x_min = np.array([-1, -1, -1])
-        vertices = vertices * ((x_max-x_min) / grad_size_axis) + x_min
+            # Rescale vertices extracted with marching cubes
+            x_max = np.array([1, 1, 1])
+            x_min = np.array([-1, -1, -1])
+            vertices = vertices * ((x_max-x_min) / grad_size_axis) + x_min
 
-        return vertices, faces
-
-# Remove the duplicate evaluate method and the test code at the bottom
+            return vertices, faces
+            
+        except Exception as e:
+            print(f"        extract_mesh error: {e}")
+            return np.array([]), np.array([])
+        
+    def visualize_mesh(self, vertices, faces, sampled_points=None, distances=None, name="mesh"):
+        """
+        Visualize the extracted mesh using polyscope.
+        """
+        try:
+            # Skip visualization if mesh is empty
+            if len(vertices) == 0 or len(faces) == 0:
+                print(f"        Skipping visualization of empty mesh: {name}")
+                return
+            
+            if not hasattr(self, 'renderer'):
+                import polyscope as ps
+                ps.init()
+                self.renderer = ps
+            
+            # Register the surface mesh
+            mesh = self.renderer.register_surface_mesh(name, vertices, faces)
+            
+            # Add point cloud if provided
+            if sampled_points is not None:
+                point_cloud_name = f"{name}_points"
+                point_cloud = self.renderer.register_point_cloud(point_cloud_name, sampled_points, radius=0.01)
+                
+                # Add scalar quantities to the point cloud (not the main polyscope module)
+                if distances is not None:
+                    point_cloud.add_scalar_quantity("distances", distances)
+            
+            print(f"        Visualization registered: {name}")
+            self.renderer.show()
+            
+        except ImportError:
+            print(f"        Polyscope not available. Install with: pip install polyscope")
+        except Exception as e:
+            print(f"        Visualization failed for {name}: {e}")

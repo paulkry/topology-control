@@ -186,8 +186,9 @@ class VolumeProcessor:
     
     def _get_volume_coords(self, device, resolution=50):
         """Get 3-dimensional vector (M, N, P) according to the desired resolutions."""
-        grid_values = torch.arange(-1, 1, float(1/resolution)).to(device)
-        grid = torch.meshgrid(grid_values, grid_values, grid_values)  # 3D grid
+        # FIX: Use linspace to get exactly 'resolution' points from -1 to 1
+        grid_values = torch.linspace(-1, 1, resolution).to(device)
+        grid = torch.meshgrid(grid_values, grid_values, grid_values, indexing='ij')  # 3D grid
         grid_size_axis = grid_values.shape[0]
         coords = torch.vstack((grid[0].ravel(), grid[1].ravel(), grid[2].ravel())).transpose(1, 0).to(device)
         return coords, grid_size_axis
