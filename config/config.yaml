@@ -9,34 +9,72 @@ processor_config:
     raw: &raw_data_path data/raw 
     processed: &processed_data_path data/processed 
 
-  train_val_split: 0.7
+  dataset_type: &dataset_type volumesdf
 
+  train_val_split: 0.8
+  use_same_shapes_for_val: true  # Set to true for DeepSDF overfitting
+
+  # Point cloud parameters
   point_cloud_params:
     radius: 0.02
-    sigma: 0.01
+    sigma: 0.02
+    mu: 0.0
     n_gaussian: 5
     n_uniform: 1000
 
+  # Volume processor params
+  volume_processor_params:
+    device: cpu  # Keep volume processing on CPU to save GPU memory
+    resolution: 50
+
 model_config:
   skip_building: false
-  model_name: mlp # pointnet
-  input_dim: 15000  # max_points (5000) * 3 (x,y,z coordinates)
-  hidden_dims: [512, 256, 128]
-  output_dim: 5000  # max_points (one signed distance per point)
-  activation: relu
-  dropout: 0.1
-  
+  model_name: VolumeDeepSDF
+
+  deepsdf:
+    z_dim: 16
+    layer_size: 256
+    volume_hidden_dim: 128
+    dropout_p: 0.2
+
+  volumedeepsdf:
+    z_dim: 2
+    layer_size: 256
+    volume_hidden_dim: 128
+    dropout_p: 0.2
+
 trainer_config:
   skip_training: false
-  processed_data_path: *processed_data_path
-  loss_function: mse 
-  optimizer: adam
-  learning_rate: 0.001
-  batch_size: 32
-  num_epochs: 20
-  max_points: 5000  # Fixed number of points per sample for consistent batching
-  save_model: true  # Whether to save the trained model via artifact manager
   
+  # Device configuration with fallback
+  device: auto  # Options: 'auto', 'cuda', 'cpu', 'cuda:0', etc.
+  allow_cpu_fallback: true  # Fall back to CPU if CUDA OOM
+  memory_efficient: true    # Enable memory optimization techniques
+  
+  # Training parameters
+  batch_size: 2  # Reduced from 8 to save memory
+  num_epochs: 1000
+  learning_rate: 0.001
+  latent_learning_rate: 0.01
+  
+  # Memory management
+  gradient_accumulation_steps: 4  # Accumulate gradients to simulate larger batch
+  max_points_per_batch: 100000      # Limit points per batch to save memory
+  
+  # DeepSDF parameters
+  dataset_type: *dataset_type
+  sdf_delta: 1.0
+  latent_sd: 0.01
+  latent_mean: 0.0
+  
+  # Model saving
+  save_frequency: 500
+  save_best_only: false
+
 evaluator_config:
-  skip_evaluation: true
-  # Specify configs
+  skip_evaluation: false        # Set to true to skip evaluation step
+  batch_size: 16               # Batch size for evaluation
+  resolution: 50               # Grid resolution for SDF evaluation (50³ = 125,000 points)
+  max_samples: 3               # Maximum number of samples to extract meshes for
+  visualization: true          # Whether to show polyscope visualizations
+  save_meshes: true           # Whether to save extracted meshes as files
