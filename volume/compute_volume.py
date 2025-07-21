@@ -126,7 +126,7 @@ def generate_syn_latent_volume_data(num_samples):
     volumes = []
     genera = []
     latents = []
-    for i in range(tqdm(num_samples)):
+    for i in tqdm(range(num_samples)):
         alpha = torch.rand(1).item()
         beta = torch.rand(1).item() * (1 - alpha)  # ensure alpha + beta ≤ 1
         latents.append((alpha, beta))
@@ -138,7 +138,7 @@ def generate_syn_latent_volume_data(num_samples):
 
         volumes.append(volume)
         genera.append(genus)
-    
+    print(genera)
     np.savez(os.path.join(data_dir, "2d_latents_volumes.npz"),
                 latents=np.array(latents, dtype=np.float32),
                 volumes=np.array(volumes, dtype=np.float32),
@@ -165,5 +165,6 @@ if __name__ == "__main__":
     model_path = "trained_deepsdfs/sdfnet_model.pt"
     scripted_model = torch.jit.load(model_path).to(DEV)
 
-    generate_latent_volume_data(2000, scripted_model)
+    # generate_latent_volume_data(2000, scripted_model)
+    generate_syn_latent_volume_data(2000)
     

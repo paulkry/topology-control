@@ -22,6 +22,7 @@ def sdf_solid_angle(p, c=torch.tensor([np.sin(np.pi/4), np.cos(np.pi/4)]), radiu
     ra: float, radius
     """
     # q = [length(xz), y]
+    c = c.to(DEV)
     q = torch.stack([
         torch.norm(p[..., [0, 2]], dim=-1),
         p[..., 1]
@@ -51,6 +52,7 @@ def sdf_box(p: torch.Tensor, b = torch.tensor([0.16, 0.33, 0.50])) -> torch.Tens
     
     Returns: (...) tensor of signed distances
     """
+    b = b.to(DEV)
     q = torch.abs(p) - b
     q_max = torch.clamp(q, min=0.0)  # same as max(q, 0)
     outside_dist = torch.norm(q_max, dim=-1)
