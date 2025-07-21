@@ -59,30 +59,37 @@ def compute_volume(latent_code, coords, grid_size, model):
     """
     sdf = predict_sdf(latent_code, coords, model).flatten()
 
-    vertices, faces, _ = igl.marching_cubes(
+    vertices, faces, e2v = igl.marching_cubes(
         sdf.cpu().numpy(), 
         coords.cpu().numpy(), 
         grid_size, grid_size, grid_size, 0.0
     )
 
-    volume, _ = triangle_mesh_to_volume(vertices, faces)
+    volume = triangle_mesh_to_volume(vertices, faces)
     
     return volume
 
+def compute_genus(latent_code, coords, grid_size, model):
+    """
+    Compute the genus of the object represented by the latent code.
+    """
+    sdf = predict_sdf(latent_code, coords, model).flatten()
 
-def is_mesh_closed(vertices, faces):
-    """
-    Check if mesh is closed (watertight)
-    """
-    edges = set()
-    for face in faces:
-        for i in range(3):
-            edge = tuple(sorted([face[i], face[(i+1)%3]]))
-            if edge in edges:
-                edges.remove(edge)
-            else:
-                edges.add(edge)
-    return len(edges) == 0
+    vertices, faces, e2v = igl.marching_cubes(
+        sdf.cpu().numpy(), 
+        coords.cpu().numpy(), 
+        grid_size, grid_size, grid_size, 0.0
+    )
+
+    # compute genus using: V - E + F = 2 - 2G
+    V = vertices.shape[0]
+    E = len(set(tuple(sorted(edge)) for face in faces for edge in [(face[i], face[(i+1) % 3]) for i in range(3)]))
+    F = faces.shape[0]
+
+    genus = (2 - (V - E + F)) // 2
+
+    return genus
+
 
 def triangle_mesh_to_volume(vertices, faces):
     if not isinstance(vertices, np.ndarray):
@@ -90,12 +97,10 @@ def triangle_mesh_to_volume(vertices, faces):
     if not isinstance(faces, np.ndarray):
         faces = np.array(faces)
 
-    is_closed = is_mesh_closed(vertices, faces)
-
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
     volume = abs(mesh.volume)
         
-    return volume, is_closed
+    return volume
 
 def generate_latent_volume_data(n, model, latent_dim, latent_sd, latent_mean):
     latents = torch.randn(n, latent_dim)
@@ -103,13 +108,19 @@ def generate_latent_volume_data(n, model, latent_dim, latent_sd, latent_mean):
     data_dir = os.path.join(os.path.dirname(VOLUME_DIR), "data", "processed", "train") #"data/processed/train"
 
     volumes = []
+    genera = []
 
     for latent in latents:
         volumes.append(compute_volume(latent, model))
+        genera.append(compute_genus(latent, model))
+
+    volumes = np.array(volumes)
+    genera = np.array(genera).astype(np.int8)
 
     np.savez(os.path.join(data_dir, "volume_labeling"),
-                 latents=latents.astype(np.float32),
-                 volumes=volumes.astype(np.float32))
+                 latents=latents,
+                 volumes=volumes,
+                 genera=genera)
     
 
 def generate_syn_latent_volume_data(num_samples):
@@ -119,6 +130,7 @@ def generate_syn_latent_volume_data(num_samples):
     coords, grid_size = get_volume_coords(resolution=50)
 
     volumes = []
+    genera = []
     latents = []
     for i in range(num_samples):
         if (i + 1) % 50 == 0:
@@ -128,11 +140,15 @@ def generate_syn_latent_volume_data(num_samples):
         latents.append((alpha, beta))
         assert 0.0 <= alpha + beta <= 1.0
         volume = compute_volume(torch.tensor([alpha, beta]), coords, grid_size, interpolator)
+        genus = compute_genus(torch.tensor([alpha, beta]), coords, grid_size, interpolator)
+
         volumes.append(volume)
+        genera.append(genus)
     
     np.savez(os.path.join(data_dir, "2d_latents_volumes.npz"),
                 latents=np.array(latents, dtype=np.float32),
-                volumes=np.array(volumes, dtype=np.float32))
+                volumes=np.array(volumes, dtype=np.float32),
+                genera=np.array(genera, dtype=np.int8))
     
 
 

@@ -29,9 +29,9 @@ def compute_path(latent_A: torch.Tensor,
         smooth_loss = (diff.pow(2).sum(dim=1)).mean()
         
         outs = model(zs)
-        consistensy_loss = ((outs - target).pow(2)).mean()
+        consistency_loss = ((outs - target).pow(2)).mean()
         
-        loss = consistensy_loss + smooth_term_w * smooth_loss
+        loss = consistency_loss + smooth_term_w * smooth_loss
         loss.backward()
         
         optimizer.step()
