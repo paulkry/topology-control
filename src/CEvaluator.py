@@ -39,8 +39,19 @@ class CEvaluator:
         print(f"Using device: {self.device}")
         print(f"Evaluation resolution: {resolution}")
         
-        # Create test dataset (equivalent to ds_test from notebook)
-        test_dataset = SDFDataset(dataset_info, split='val', fix_seed=True)
+        # Determine dataset type based on model architecture
+        model_name = model.__class__.__name__
+        is_volume_model = model_name == 'VolumeDeepSDF'
+        
+        # Create test dataset - use VolumeSDFDataset for VolumeDeepSDF
+        if is_volume_model:
+            from src.CModelTrainer import VolumeSDFDataset
+            test_dataset = VolumeSDFDataset(dataset_info, split='val', fix_seed=True)
+            print(f"   Using VolumeSDFDataset for {model_name}")
+        else:
+            test_dataset = SDFDataset(dataset_info, split='val', fix_seed=True)
+            print(f"   Using SDFDataset for {model_name}")
+        
         test_loader = DataLoader(
             test_dataset, 
             batch_size=batch_size, 
@@ -57,10 +68,14 @@ class CEvaluator:
         print(f"   Expected volume size: {actual_grid_size ** 3}")
         
         evaluation_results = {
-            'evaluation_type': 'sdf_dataset',
+            'evaluation_type': 'volumesdf_dataset' if is_volume_model else 'sdf_dataset',
+            'model_type': model_name,
             'test_losses': [],
+            'volume_losses': [] if is_volume_model else None,
+            'sdf_losses': [],
             'extracted_meshes': [],
             'sdf_statistics': {'min_values': [], 'max_values': []},
+            'volume_statistics': {'predictions': [], 'targets': []} if is_volume_model else None,
             'resolution': self.resolution,
             'actual_grid_size': actual_grid_size,
             'num_samples': len(test_dataset),
@@ -72,21 +87,60 @@ class CEvaluator:
         with torch.no_grad():
             # Evaluate losses on batched data
             total_loss = 0.0
+            total_sdf_loss = 0.0
+            total_volume_loss = 0.0
             num_batches = 0
             
-            for batch_idx, (coords, latents, sdfs) in enumerate(test_loader):
-                coords = coords.to(self.device)
-                latents = latents.to(self.device)
-                sdfs = sdfs.to(self.device)
+            for batch_idx, batch_data in enumerate(test_loader):
+                if is_volume_model:
+                    # VolumeSDFDataset returns 4 items: coords, latents, sdfs, volumes
+                    coords, latents, sdfs, volumes = batch_data
+                    coords = coords.to(self.device)
+                    latents = latents.to(self.device)
+                    sdfs = sdfs.to(self.device)
+                    volumes = volumes.to(self.device)
+                    
+                    # Predict both SDF and volume
+                    predictions = self.model(latents, coords)
+                    predicted_sdfs = predictions['sdf']
+                    predicted_volumes = predictions['volume']
+                    
+                    # Calculate losses
+                    sdf_loss = torch.nn.functional.mse_loss(predicted_sdfs, sdfs)
+                    volume_loss = torch.nn.functional.mse_loss(predicted_volumes, volumes)
+                    combined_loss = sdf_loss + volume_loss  # Simple combination for evaluation
+                    
+                    evaluation_results['sdf_losses'].append(sdf_loss.item())
+                    evaluation_results['volume_losses'].append(volume_loss.item())
+                    evaluation_results['test_losses'].append(combined_loss.item())
+                    
+                    # Store volume statistics
+                    evaluation_results['volume_statistics']['predictions'].extend(predicted_volumes.cpu().numpy().tolist())
+                    evaluation_results['volume_statistics']['targets'].extend(volumes.cpu().numpy().tolist())
+                    
+                    total_sdf_loss += sdf_loss.item()
+                    total_volume_loss += volume_loss.item()
+                    total_loss += combined_loss.item()
+                    
+                else:
+                    # Regular SDFDataset returns 3 items: coords, latents, sdfs
+                    coords, latents, sdfs = batch_data
+                    coords = coords.to(self.device)
+                    latents = latents.to(self.device)
+                    sdfs = sdfs.to(self.device)
+                    
+                    # Predict SDF values
+                    predicted_sdfs = self.model(latents, coords)
+                    predicted_sdfs = predicted_sdfs.squeeze(-1) if predicted_sdfs.dim() > 1 else predicted_sdfs
+                    
+                    # Calculate loss
+                    batch_loss = torch.nn.functional.mse_loss(predicted_sdfs, sdfs)
+                    evaluation_results['test_losses'].append(batch_loss.item())
+                    evaluation_results['sdf_losses'].append(batch_loss.item())
+                    
+                    total_loss += batch_loss.item()
+                    total_sdf_loss += batch_loss.item()
                 
-                # Predict SDF values
-                predicted_sdfs = self.model(latents, coords)
-                predicted_sdfs = predicted_sdfs.squeeze(-1) if predicted_sdfs.dim() > 1 else predicted_sdfs
-                
-                # Calculate loss
-                batch_loss = torch.nn.functional.mse_loss(predicted_sdfs, sdfs)
-                evaluation_results['test_losses'].append(batch_loss.item())
-                total_loss += batch_loss.item()
                 num_batches += 1
             
             # Extract meshes for individual samples (equivalent to notebook extraction)
@@ -94,9 +148,16 @@ class CEvaluator:
             max_samples = min(3, len(test_dataset))  # Limit for faster evaluation
             
             for sample_idx in range(max_samples):
-                coords, latent_vec, true_sdfs = test_dataset[sample_idx]
+                sample_data = test_dataset[sample_idx]
                 
-                print(f"      Sample {sample_idx}:")
+                if is_volume_model:
+                    coords, latent_vec, true_sdfs, true_volume = sample_data
+                    print(f"      Sample {sample_idx} (Volume Model):")
+                    print(f"        True volume: {true_volume:.6f}")
+                else:
+                    coords, latent_vec, true_sdfs = sample_data
+                    print(f"      Sample {sample_idx} (SDF Model):")
+                
                 print(f"        Latent shape: {latent_vec.shape}")
                 print(f"        Sample coords shape: {coords.shape}")
                 
@@ -111,8 +172,14 @@ class CEvaluator:
                 print(f"        Model inputs - latent: {latent_batch.shape}, coords: {coords_batch.shape}")
                 
                 # Predict full SDF volume
-                pred_full_sdfs = self.model(latent_batch, coords_batch)
-                pred_full_sdfs = pred_full_sdfs.squeeze()  # Remove batch dimension
+                if is_volume_model:
+                    predictions = self.model(latent_batch, coords_batch)
+                    pred_full_sdfs = predictions['sdf'].squeeze()
+                    pred_volume = predictions['volume'].squeeze()
+                    print(f"        Predicted volume: {pred_volume.item():.6f}")
+                else:
+                    pred_full_sdfs = self.model(latent_batch, coords_batch)
+                    pred_full_sdfs = pred_full_sdfs.squeeze()  # Remove batch dimension
                 
                 print(f"        Model output shape: {pred_full_sdfs.shape}")
                 print(f"        Expected size: {actual_grid_size ** 3}")
@@ -136,7 +203,7 @@ class CEvaluator:
                     # FIX: Pass the SDF tensor directly, not with unsqueeze
                     vertices, faces = self.extract_mesh(actual_grid_size, pred_full_sdfs)
                     
-                    evaluation_results['extracted_meshes'].append({
+                    mesh_info = {
                         'sample_idx': sample_idx,
                         'vertices': vertices,
                         'faces': faces,
@@ -144,7 +211,14 @@ class CEvaluator:
                         'sdf_max': sdf_max,
                         'num_vertices': len(vertices),
                         'num_faces': len(faces)
-                    })
+                    }
+                    
+                    # Add volume info for VolumeDeepSDF
+                    if is_volume_model:
+                        mesh_info['predicted_volume'] = pred_volume.item()
+                        mesh_info['true_volume'] = true_volume
+                    
+                    evaluation_results['extracted_meshes'].append(mesh_info)
                     
                     print(f"        ✅ Mesh extracted: {len(vertices)} vertices, {len(faces)} faces")
                     
@@ -158,6 +232,17 @@ class CEvaluator:
         
         # Compute final metrics
         evaluation_results['average_test_loss'] = total_loss / num_batches if num_batches > 0 else float('inf')
+        evaluation_results['average_sdf_loss'] = total_sdf_loss / num_batches if num_batches > 0 else float('inf')
+        
+        if is_volume_model:
+            evaluation_results['average_volume_loss'] = total_volume_loss / num_batches if num_batches > 0 else float('inf')
+            
+            # Volume prediction statistics
+            if evaluation_results['volume_statistics']['predictions']:
+                pred_vols = np.array(evaluation_results['volume_statistics']['predictions'])
+                true_vols = np.array(evaluation_results['volume_statistics']['targets'])
+                evaluation_results['volume_statistics']['mae'] = np.mean(np.abs(pred_vols - true_vols))
+                evaluation_results['volume_statistics']['rmse'] = np.sqrt(np.mean((pred_vols - true_vols) ** 2))
         
         if evaluation_results['sdf_statistics']['min_values']:
             evaluation_results['sdf_statistics']['avg_min'] = np.mean(evaluation_results['sdf_statistics']['min_values'])
@@ -166,7 +251,13 @@ class CEvaluator:
         evaluation_results['status'] = 'completed'
         
         print(f"   ✅ SDF evaluation complete!")
-        print(f"      Average test loss: {evaluation_results['average_test_loss']:.6f}")
+        print(f"      Average SDF loss: {evaluation_results['average_sdf_loss']:.6f}")
+        if is_volume_model:
+            print(f"      Average volume loss: {evaluation_results['average_volume_loss']:.6f}")
+            print(f"      Average combined loss: {evaluation_results['average_test_loss']:.6f}")
+            if 'mae' in evaluation_results['volume_statistics']:
+                print(f"      Volume MAE: {evaluation_results['volume_statistics']['mae']:.6f}")
+                print(f"      Volume RMSE: {evaluation_results['volume_statistics']['rmse']:.6f}")
         print(f"      Meshes extracted: {len(evaluation_results['extracted_meshes'])}")
         
         return evaluation_results
