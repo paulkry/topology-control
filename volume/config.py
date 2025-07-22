@@ -10,7 +10,7 @@ LR = 1e-3  # scale depending on batch
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS = 300
 LAYER_SIZE = 128
-LATENT_VEC_MAX = 10 # what is the max entry of latent vec dims?
+LATENT_VEC_MAX = 1 # what is the max entry of latent vec dims?
 
 """
 whether model(latent, xyz) or model(xyz, latent). i.e., what the model expects

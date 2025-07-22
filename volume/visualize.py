@@ -1,13 +1,13 @@
 import torch
 import polyscope as ps
-import igl
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.colors import ListedColormap
 from scipy.interpolate import griddata
 import os
 
-from compute_volume import get_volume_coords, predict_sdf
-from sdfs import SDF_interpolator
+from compute_volume import get_volume_coords, generate_mesh
+from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
 from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX
 
 
@@ -16,12 +16,8 @@ def visualize_sdf(sdf, latent = torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
     Extract the mesh from an interpolated sdf/deepsdf and visualize it.
     """
     coords, grid_size = get_volume_coords()
-    sdf_values = predict_sdf(latent, coords, sdf, type).flatten()
+    vertices, faces = generate_mesh(latent, coords, grid_size, sdf, type)
 
-
-    vertices, faces, _ = igl.marching_cubes(sdf_values, coords.cpu().numpy(), grid_size, grid_size, grid_size, 0.0)
-
-    
     ps.init()
     ps_sdf = ps.register_surface_mesh("sdf visualization", vertices, faces)
 
@@ -57,13 +53,9 @@ def construct_from_latent(model, latent, positioning, index, type):
         vertices, faces
     """
     coords, grid_size = get_volume_coords()
-    sdf = predict_sdf(latent.to(DEV), coords, model, type).flatten()
 
-    vertices, faces, _ = igl.marching_cubes(
-        sdf.detach().cpu().numpy(), 
-        coords.cpu().numpy(), 
-        grid_size, grid_size, grid_size, 0.0
-    )
+    vertices, faces = generate_mesh(latent, coords, grid_size, model, type)
+
     if positioning == "row":
         vertices[:, 0] += 2 * index
     else:
@@ -93,7 +85,7 @@ def visualize_2d_path(model, path=[]):
         _visualize_heatmap(xs, ys, predicted_volumes)
         return
 
-    path = np.array(path)
+    path = path.cpu().numpy()
     path_xs = path[:, 0]
     path_ys = path[:, 1]
 
@@ -111,6 +103,33 @@ def visualize_latent_vs_volume(path=os.path.join(VOLUME_DIR, "data", "2d_latents
     xs, ys = latents[:, 0], latents[:, 1]
 
     _visualize_heatmap(xs, ys, volumes)
+
+def visualize_latent_vs_genera(path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")):
+    """
+        Plot 2d latent vs genera
+    """
+    data = np.load(path)
+    latents = data["latents"]
+    genera = data["genera"]
+
+    idx = np.where(genera == 3)[0][0]
+    print(latents[idx])
+
+    plt.figure(figsize=(6, 6))
+    cmap = ListedColormap(plt.get_cmap('tab10').colors[:5])
+    scatter = plt.scatter(latents[:, 0], latents[:, 1], c=genera, cmap=cmap, s=5)
+
+    # Optional: colorbar with label names
+    cbar = plt.colorbar(scatter, ticks=range(np.min(genera), np.max(genera)+1))
+    cbar.set_label('Genera')
+    cbar.set_ticks([0, 1, 2, 3, 4])
+
+    plt.xlabel('Latent dim 1')
+    plt.ylabel('Latent dim 2')
+    plt.title('Latent vs. genera')
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()
 
 def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     """
@@ -142,8 +161,13 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.show()
 
 if __name__ == "__main__":
+    sdf_interpolator = SDF_interpolator(sdf_sphere, sdf_torus, sdf_2_torus)
+    # visualize_latent_vs_genera()
+    # visualize_sdf(sdf_interpolator, latent=torch.tensor([0.29890096, 0.16535072]))
+
+    # from compute_path import compute_path, compute_path2
     from compute_path_opt import compute_path
-    # from compute_path_with_geodesic import compute_geodesic_path
+    # # from compute_path_with_geodesic import compute_geodesic_path
     from model import Latent2Volume
     from config import LATENT_DIM, DEV
 
@@ -152,24 +176,20 @@ if __name__ == "__main__":
 
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    
-    path = compute_path(
-        torch.tensor([2, 0], dtype=torch.float32).to(DEV),
-        torch.tensor([1, 4], dtype=torch.float32).to(DEV),
-        model,
-        10,
-        smooth_term_w=1e-5
-    ).cpu()
 
-    # # print("Path found with length:", len(path))
-    # path = [x.detach() for x in path]
+    # visualize_2d_path(model)
+
+    path = compute_path(torch.tensor([0, 1], dtype=torch.float32).to(DEV), torch.tensor([0.4, 0], dtype=torch.float32).to(DEV), model, 100, smooth_term_w=0.01)
+
+    print("Path found with length:", len(path))
+
     visualize_2d_path(model, path=path)
 
     # Visualizing the 3d shapes from the paths
     # model_path = os.path.join(VOLUME_DIR, "trained_deepsdfs", "sdfnet_model.pt")
     # deepsdf = torch.jit.load(model_path).to(DEV)
 
-    # path = [[0, 0], [10, 100]]
-    # path = torch.tensor(path)
+    # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
+    # path = torch.tensor(path, dtype=torch.float32)
 
-    visualize_interpolation_path(model, path, LATENT_FIRST)
+    # visualize_interpolation_path(sdf_interpolator, path, COORDS_FIRST)
