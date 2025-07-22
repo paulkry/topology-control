@@ -93,13 +93,15 @@ class PointCloudProcessor:
         # Concatenate surface points with random points
         sampled_points = np.concatenate((random_points, surface_points), axis=0)
         
-        # Add Gaussian noise if needed
+                # Add Gaussian noise if needed
         if n_gaussian > 0 and sigma > 0:
-            noise = np.random.normal(mu, sigma, (n_gaussian, surface_points.shape[0], 3))
-            for i in range(n_gaussian):
-                new_points = surface_points + noise[i]
-                sampled_points = np.concatenate((sampled_points, new_points), axis=0)
-        
+            noise = np.random.normal(mu, sigma, (n_gaussian * surface_points.shape[0], 3))
+            # Tile surface points to match noise shape
+            tiled_surface = np.tile(surface_points, (n_gaussian, 1))
+            gaussian_points = tiled_surface + noise
+            
+            sampled_points = np.concatenate((sampled_points, gaussian_points), axis=0)
+
         return sampled_points
 
     def generate_point_cloud(self, meshes, radius=0.02, sigma=0.0, mu=0.0, n_gaussian=10, n_uniform=1000):
