@@ -8,7 +8,7 @@ import torch
 import os
 from tqdm import tqdm
 
-from sdfs import SDF_interpolator
+from sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
 from config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
 
 def generate_mesh(latent_code, coords, grid_size, model, type=COORDS_FIRST):
@@ -27,7 +27,7 @@ def get_volume_coords(resolution = 50):
     """Get 3-dimensional vector (M, N, P) according to the desired resolutions
     on the [-1, 1]^3 cube"""
     # Define grid
-    grid_values = torch.arange(-0.7, 0.7, float(1/resolution)).to(DEV) # e.g. 50 resolution -> 1/50 
+    grid_values = torch.arange(-1, 1, float(1/resolution)).to(DEV) # e.g. 50 resolution -> 1/50 
     grid = torch.meshgrid(grid_values, grid_values, grid_values)
     
     grid_size_axis = grid_values.shape[0]
@@ -62,13 +62,7 @@ def predict_sdf(latent, coords, model, type=COORDS_FIRST):
 
     return sdf_values
 
-"""
-This is the main function that takes a latent_code
-and a potentially NN-parametrized SDF
-to output the volume of the corresponding surface. 
-We are hoping to use it to generate data for
-the classifier (regressor) we will be training.
-"""
+
 
 def compute_genus(vertices, faces):
     """
@@ -119,7 +113,7 @@ def generate_latent_volume_data(n, model):
 
 def generate_syn_latent_volume_data(num_samples):
     data_dir = os.path.join(VOLUME_DIR, "data") # volume/data
-    interpolator = SDF_interpolator()
+    interpolator = SDF_interpolator(sdf_sphere, sdf_torus, sdf_2_torus)
     # will be passing coords around to avoid recomputation
     coords, grid_size = get_volume_coords(resolution=50)
 
