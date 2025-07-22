@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 import meshio as meshio
-import polyscope as ps
+# import polyscope as ps
 from pathlib import Path
 import igl
 
@@ -58,7 +58,7 @@ class PointCloudProcessor:
         self.data_dir = data_dir
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
-        self.renderer = MeshRenderer()
+        # self.renderer = MeshRenderer()
     
     def load_mesh(self, mesh_file):
         """Load and normalize mesh"""
@@ -89,14 +89,18 @@ class PointCloudProcessor:
         # Sample random points in the -1 to 1 cube
         random_points = np.random.uniform(-1, 1, (n_uniform, 3))
         # Compute surface points using blue noise
+        print('compute blue noise')
         surface_points = igl.blue_noise(vertices, faces, radius)[2]
         # Concatenate surface points with random points
+        print('concat')
         sampled_points = np.concatenate((random_points, surface_points), axis=0)
         
         # Add Gaussian noise if needed
+        from tqdm import tqdm
         if n_gaussian > 0 and sigma > 0:
             noise = np.random.normal(mu, sigma, (n_gaussian, surface_points.shape[0], 3))
-            for i in range(n_gaussian):
+            print("entering tqdm")
+            for i in tqdm(range(n_gaussian)):
                 new_points = surface_points + noise[i]
                 sampled_points = np.concatenate((sampled_points, new_points), axis=0)
         
@@ -140,9 +144,9 @@ class PointCloudProcessor:
                 np.save(distances_file, distances)
             
             # Visualize on Polyscope
-            self.renderer.render_mesh_with_points(vertices, faces, sampled_points, distances, name, f"{name}_points")
+            # self.renderer.render_mesh_with_points(vertices, faces, sampled_points, distances, name, f"{name}_points")
         
-        self.renderer.show()
+        # self.renderer.show()
     
     def get_dataset_stats(self, mesh_name):
         """Get statistics about generated dataset"""

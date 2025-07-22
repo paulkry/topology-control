@@ -44,7 +44,7 @@ class SDFDataset(Dataset):
         latent_mean = self.dataset_params['latent_mean']
         latent_sd = self.dataset_params['latent_sd']
         
-        self.latent_vectors = torch.randn(len(self.files), z_dim)
+        self.latent_vectors = torch.randn(len(self.files), z_dim, device='cuda')
         self.latent_vectors = (self.latent_vectors * latent_sd) + latent_mean
         self.latent_vectors.requires_grad = True
         
@@ -389,7 +389,7 @@ class CModelTrainer:
             
             # Get latent vectors from dataset for SDF training
             if hasattr(train_dataset, 'latent_vectors'):
-                latent_vectors = train_dataset.latent_vectors.to(self.device)
+                latent_vectors = train_dataset.latent_vectors #.to(self.device)
                 optimizer = self._get_optimizer(model, latent_vectors)
                 print(f"✓ SDF training setup complete with dual learning rates")
             else:
@@ -492,6 +492,7 @@ class CModelTrainer:
                   f"{' (Best Model)' if is_best else ''}")
             
             # Save checkpoints and models
+            # if epoch // self.save_frequency == 0:
             try:
                 # Always save latest checkpoint
                 latest_checkpoint = {
@@ -713,7 +714,7 @@ class CModelTrainer:
             if self.optimizer_name.lower() == 'adam':
                 optimizer = optim.Adam([
                     {"params": model.parameters(), "lr": lr_net},
-                    {"params": latent_vectors, "lr": lr_latent}
+                    {"params": [latent_vectors], "lr": lr_latent}
                 ])
             elif self.optimizer_name.lower() == 'adamw':
                 optimizer = optim.AdamW([
@@ -826,7 +827,7 @@ class CModelTrainer:
             
             plt.figure(figsize=(10, 6))
             plt.plot(epochs, train_losses, 'o-', label='Training Loss', alpha=0.8)
-            plt.plot(epochs, val_losses, 's-', label='Validation Loss', alpha=0.8)
+            # plt.plot(epochs, val_losses, 's-', label='Validation Loss', alpha=0.8)
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
             plt.title(f'Training and Validation Loss - {self.dataset_type.upper()} Dataset')

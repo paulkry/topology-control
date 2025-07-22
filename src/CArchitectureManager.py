@@ -161,7 +161,7 @@ class DeepSDF(torch.nn.Module):
         return torch.nn.Sequential(
             torch.nn.Linear(input_size, output_size),
             torch.nn.ReLU(),
-            torch.nn.Dropout(self.dropout_p)
+            # torch.nn.Dropout(self.dropout_p)
         )
 
     def forward(self, latent_vec, coords):
