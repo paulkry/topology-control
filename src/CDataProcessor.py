@@ -5,66 +5,66 @@ import os
 import numpy as np
 import meshio as meshio
 import igl
-from src.CGeometryUtils import PointCloudProcessor, VolumeProcessor
+import torch
+from src.CGeometryUtils import PointCloudProcessor, VolumeProcessor, compute_volumes_from_mesh_files
   
 class CDataProcessor:
+
     def __init__(self, config):
         """
-        Initialize the data processor with configuration parameters.
+        Initialize CDataProcessor with configuration.
         
-        Parameters:
-            config (dict): Configuration parameters for data processing including:
-                - dataset_paths: dict with 'raw' and 'processed' paths (train/val auto-derived)
-                - point_cloud_params: dict with sampling parameters
-                - train_val_split: float between 0 and 1 for train/validation split ratio
+        Args:
+            config: Dictionary containing processor configuration
         """
         self.config = config
         
         # Extract paths from config
-        dataset_paths = config.get('dataset_paths', {})
-        raw_path = dataset_paths.get('raw', 'data/raw')
-        processed_path = dataset_paths.get('processed', 'data/processed')
+        self.raw_data_path = config['dataset_paths']['raw']
+        self.processed_data_path = config['dataset_paths']['processed']
+        self.dataset_type = config.get('dataset_type', 'sdf')
         
-         # Handle relative paths - make them relative to the project root
-        if not os.path.isabs(raw_path):
-            # Get the project root (parent of src directory)
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(current_dir)  # Go up from src to project root
-            self.raw_data_path = os.path.join(project_root, raw_path)
-            self.processed_data_path = os.path.join(project_root, processed_path)
-        else:
-            self.raw_data_path = raw_path
-            self.processed_data_path = processed_path
-            
-        # Automatically derive train and val paths from processed path
+        # Create train/val subdirectories
         self.train_data_path = os.path.join(self.processed_data_path, 'train')
         self.val_data_path = os.path.join(self.processed_data_path, 'val')
         
-        # Extract train/val split ratio
-        self.train_val_split = config.get('train_val_split', 0.8)  # Default 80% train, 20% val
+        # Train/val split ratio
+        self.train_val_split = config.get('train_val_split', 0.8)
         
-        # Extract point cloud processing parameters
-        pc_params = config.get('point_cloud_params', {})
-        self.radius = pc_params.get('radius', 0.02)
-        self.sigma = pc_params.get('sigma', 0.01)
-        self.mu = pc_params.get('mu', 0.0)
-        self.n_gaussian = pc_params.get('n_gaussian', 5)
-        self.n_uniform = pc_params.get('n_uniform', 1000)
+        # NEW: Option to use same shapes for train and validation
+        self.use_same_shapes_for_val = config.get('use_same_shapes_for_val', False)
         
-        # Extract the volume processor parameter
-        v_params = config.get('volume_processor_params', {})
-        self.device = v_params.get('device', 'cpu')  # Default to CPU
-        self.resolution = v_params.get('resolution', 64)  # Default resolution
+        # Extract point cloud sampling parameters
+        point_cloud_params = config.get('point_cloud_params', {})
+        self.radius = point_cloud_params.get('radius', 0.02)
+        self.sigma = point_cloud_params.get('sigma', 0.02)
+        self.mu = point_cloud_params.get('mu', 0.0)
+        self.n_gaussian = point_cloud_params.get('n_gaussian', 5)
+        self.n_uniform = point_cloud_params.get('n_uniform', 10000)
         
-        # Get all mesh files from raw directory
+        # Volume processing parameters
+        volume_params = config.get('volume_processor_params', {})
+        self.device = volume_params.get('device', 'cpu')
+        self.resolution = volume_params.get('resolution', 50)
+        
+        # Initialize processors
+        self.point_cloud_processor = PointCloudProcessor()
+        self.volume_processor = VolumeProcessor(device=self.device, resolution=self.resolution)
+        
+        # Discover mesh files
         self.mesh_files = self._discover_mesh_files()
         
-        # Initialize point cloud processor
-        self.point_cloud_processor = PointCloudProcessor(data_dir=self.processed_data_path)
-        
-        # Initialize volume processor 
-        self.volume_processor = VolumeProcessor(device=self.device, resolution=self.resolution)
-    
+        # Calculate volumes if needed for VolumeSDFDataset
+        if self.dataset_type == 'volumesdf':
+            print("Computing volumes for VolumeSDFDataset...")
+            self.shape_volumes, self.mesh_name_to_volume = compute_volumes_from_mesh_files(
+                [os.path.join(self.raw_data_path, f) for f in self.mesh_files]
+            )
+            print(f"✓ Computed volumes for {len(self.shape_volumes)} meshes")
+        else:
+            self.shape_volumes = None
+            self.mesh_name_to_volume = {}
+
     def process(self):
         """
         Main processing method that integrates with the pipeline.
@@ -113,18 +113,21 @@ class CDataProcessor:
             'train_count': len(train_files),
             'val_count': len(val_files),
             'split_ratio': self.train_val_split,
+            'use_same_shapes_for_val': self.use_same_shapes_for_val,  # Track this setting
             'processing_params': {
                 'radius': self.radius,
                 'sigma': self.sigma,
                 'mu': self.mu,
                 'n_gaussian': self.n_gaussian,
                 'n_uniform': self.n_uniform
-            }
+            },
+            'shape_volumes': self.shape_volumes if hasattr(self, 'shape_volumes') else None
         }
         
-            
         # Process training files
         print(f"Processing {len(train_files)} training files...")
+        processed_train_meshes = set()  # Track processed meshes to avoid duplication
+        
         for mesh_path in train_files:
             result = self._process_single_mesh(mesh_path, 'train')
             if result is not None:
@@ -133,6 +136,7 @@ class CDataProcessor:
                 processing_results['point_cloud_files']['train'].append(result['points_file'])
                 processing_results['signed_distance_files']['train'].append(result['distances_file'])
                 processing_results['total_points_generated'] += result['num_points']
+                processed_train_meshes.add(result['mesh_name'])
             else:
                 # Track failed files
                 mesh_name = os.path.splitext(os.path.basename(mesh_path))[0]
@@ -142,29 +146,72 @@ class CDataProcessor:
         # Process validation files
         print(f"Processing {len(val_files)} validation files...")
         for mesh_path in val_files:
-            result = self._process_single_mesh(mesh_path, 'val')
-            if result is not None:
-                processing_results['processed_files'].append(result['mesh_name'])
-                processing_results['val_files'].append(result['mesh_name'])
-                processing_results['point_cloud_files']['val'].append(result['points_file'])
-                processing_results['signed_distance_files']['val'].append(result['distances_file'])
-                processing_results['total_points_generated'] += result['num_points']
+            mesh_name = os.path.splitext(os.path.basename(mesh_path))[0]
+            
+            # NEW: If using same shapes and mesh already processed for training, 
+            # create symlinks or reference same files to save processing time
+            if self.use_same_shapes_for_val and mesh_name in processed_train_meshes:
+                print(f"  [VAL] [Same Shape] Reusing training data for {mesh_name}")
+                
+                # Find corresponding train files
+                train_idx = processing_results['train_files'].index(mesh_name)
+                train_points_file = processing_results['point_cloud_files']['train'][train_idx]
+                train_distances_file = processing_results['signed_distance_files']['train'][train_idx]
+                
+                # For validation, we can either:
+                # 1. Use same files (efficient but same exact samples)
+                # 2. Process again with different random seed (different samples, more realistic validation)
+                
+                # Option 1: Reuse same files (faster)
+                val_points_file = train_points_file
+                val_distances_file = train_distances_file
+                
+                # Option 2: Process with different sampling (uncomment if preferred)
+                # result = self._process_single_mesh(mesh_path, 'val')
+                # if result is not None:
+                #     val_points_file = result['points_file']
+                #     val_distances_file = result['distances_file']
+                # else:
+                #     continue
+                
+                processing_results['val_files'].append(mesh_name)
+                processing_results['point_cloud_files']['val'].append(val_points_file)
+                processing_results['signed_distance_files']['val'].append(val_distances_file)
+                
+                # Don't double-count points if reusing same files
+                if val_points_file != train_points_file:
+                    points_data = np.load(val_points_file)
+                    processing_results['total_points_generated'] += len(points_data)
+            
             else:
-                # Track failed files
-                mesh_name = os.path.splitext(os.path.basename(mesh_path))[0]
-                processing_results['corrupted_files'].append(mesh_name)
-                processing_results['skipped_files'].append(f"{mesh_name} (val)")
+                # Process normally for different shapes or if not reusing
+                result = self._process_single_mesh(mesh_path, 'val')
+                if result is not None:
+                    if mesh_name not in processing_results['processed_files']:
+                        processing_results['processed_files'].append(result['mesh_name'])
+                    processing_results['val_files'].append(result['mesh_name'])
+                    processing_results['point_cloud_files']['val'].append(result['points_file'])
+                    processing_results['signed_distance_files']['val'].append(result['distances_file'])
+                    processing_results['total_points_generated'] += result['num_points']
+                else:
+                    # Track failed files
+                    processing_results['corrupted_files'].append(mesh_name)
+                    processing_results['skipped_files'].append(f"{mesh_name} (val)")
         
         # Update counts to reflect actual processed files
         processing_results['train_count'] = len(processing_results['train_files'])
         processing_results['val_count'] = len(processing_results['val_files'])
-        processing_results['success_rate'] = len(processing_results['processed_files']) / len(mesh_paths)
+        processing_results['success_rate'] = len(set(processing_results['processed_files'])) / len(mesh_paths)
         
         # Summary logging
         print(f"Data processing complete.")
-        print(f"  Successfully processed: {len(processing_results['processed_files'])} files")
+        print(f"  Successfully processed: {len(set(processing_results['processed_files']))} unique files")
         print(f"  Train: {processing_results['train_count']} files")
         print(f"  Val: {processing_results['val_count']} files")
+        
+        if self.use_same_shapes_for_val:
+            print(f"  📋 Using same shapes for train and validation (DeepSDF overfitting mode)")
+        
         print(f"  Total points: {processing_results['total_points_generated']}")
         
         if processing_results['corrupted_files']:
@@ -173,6 +220,147 @@ class CDataProcessor:
         
         return processing_results
 
+    def generate_sdf_dataset(self, z_dim=32, latent_mean=0.0, latent_sd=0.01):
+        """
+        Generate SDF dataset compatible with DeepSDF training pipeline.
+        For VolumeSDFDataset, includes shape volume information.
+        """
+        # First ensure data is processed
+        processing_results = self.process()
+        
+        # Get the device and resolution parameters from the VolumeProcessor
+        device = self.volume_processor.device
+        resolution = self.volume_processor.resolution
+        
+        # Get volume coordinates from VolumeProcessor
+        volume_coords = self.volume_processor.volume_coords
+        
+        # Convert volume_coords tensor to numpy array (JSON serializable)
+        if hasattr(volume_coords, 'cpu'):
+            volume_coords_array = volume_coords.cpu().numpy()
+        else:
+            volume_coords_array = volume_coords
+        
+        # Create dataset metadata - only use serializable formats
+        dataset_info = {
+            'train_files': [],
+            'val_files': [],
+            'volume_coords': volume_coords_array,
+            'dataset_params': {
+                'z_dim': z_dim,
+                'latent_mean': latent_mean,
+                'latent_sd': latent_sd,
+                'num_samples': self.n_uniform + self.n_gaussian * 10,
+                'volume_coords_resolution': self.resolution,
+                'point_cloud_params': processing_results['processing_params']
+            },
+            'processing_results': processing_results
+        }
+        
+        # Prepare volume data for VolumeSDFDataset
+        if self.shape_volumes is not None:
+            train_volumes = []
+            val_volumes = []
+            
+            # Collect train files with volumes
+            for i, mesh_name in enumerate(processing_results['train_files']):
+                points_file = processing_results['point_cloud_files']['train'][i]
+                distances_file = processing_results['signed_distance_files']['train'][i]
+                
+                # Get volume for this mesh
+                volume = self.mesh_name_to_volume.get(mesh_name, 0.0)
+                train_volumes.append(volume)
+                
+                dataset_info['train_files'].append({
+                    'mesh_name': mesh_name,
+                    'points_file': points_file,
+                    'distances_file': distances_file,
+                    'volume': volume,
+                    'split': 'train'
+                })
+            
+            # Collect val files with volumes
+            for i, mesh_name in enumerate(processing_results['val_files']):
+                points_file = processing_results['point_cloud_files']['val'][i]
+                distances_file = processing_results['signed_distance_files']['val'][i]
+                
+                # Get volume for this mesh
+                volume = self.mesh_name_to_volume.get(mesh_name, 0.0)
+                val_volumes.append(volume)
+                
+                dataset_info['val_files'].append({
+                    'mesh_name': mesh_name,
+                    'points_file': points_file,
+                    'distances_file': distances_file,
+                    'volume': volume,
+                    'split': 'val'
+                })
+            
+            # FIXED: Add split-specific volume arrays for VolumeSDFDataset
+            dataset_info['shape_volumes'] = self.shape_volumes  # All volumes (for reference)
+            dataset_info['train_volumes'] = train_volumes       # Train split volumes - KEY FIX
+            dataset_info['val_volumes'] = val_volumes           # Val split volumes - KEY FIX
+            
+            # Volume statistics for normalization/analysis
+            all_volumes = np.array(self.shape_volumes)
+            dataset_info['volume_stats'] = {
+                'min_volume': float(np.min(all_volumes)),
+                'max_volume': float(np.max(all_volumes)),
+                'mean_volume': float(np.mean(all_volumes)),
+                'std_volume': float(np.std(all_volumes)),
+                'total_samples': len(all_volumes),
+                'train_samples': len(train_volumes),
+                'val_samples': len(val_volumes)
+            }
+            
+            print(f"Generated VolumeSDFDataset info:")
+            print(f"  Train files: {len(dataset_info['train_files'])} (volumes: {len(train_volumes)})")
+            print(f"  Val files: {len(dataset_info['val_files'])} (volumes: {len(val_volumes)})")
+            print(f"  Volume range: [{dataset_info['volume_stats']['min_volume']:.6f}, {dataset_info['volume_stats']['max_volume']:.6f}]")
+            
+        else:
+            # Regular SDF dataset without volumes
+            for i, mesh_name in enumerate(processing_results['train_files']):
+                points_file = processing_results['point_cloud_files']['train'][i]
+                distances_file = processing_results['signed_distance_files']['train'][i]
+                
+                dataset_info['train_files'].append({
+                    'mesh_name': mesh_name,
+                    'points_file': points_file,
+                    'distances_file': distances_file,
+                    'split': 'train'
+                })
+            
+            for i, mesh_name in enumerate(processing_results['val_files']):
+                points_file = processing_results['point_cloud_files']['val'][i]
+                distances_file = processing_results['signed_distance_files']['val'][i]
+                
+                dataset_info['val_files'].append({
+                    'mesh_name': mesh_name,
+                    'points_file': points_file,
+                    'distances_file': distances_file,
+                    'split': 'val'
+                })
+            
+            print(f"Generated SDF dataset info:")
+            print(f"  Train files: {len(dataset_info['train_files'])}")
+            print(f"  Val files: {len(dataset_info['val_files'])}")
+        
+        print(f"  Total points: {processing_results['total_points_generated']}")
+        print(f"  Volume resolution: {self.resolution}³")
+        print(f"  Volume coords shape: {volume_coords_array.shape}")
+        
+        # Return in the format expected by the pipeline orchestrator
+        return {
+            'status': 'success',
+            'dataset_info': dataset_info,
+            'processed_data_path': self.processed_data_path,
+            'train_files': dataset_info['train_files'],
+            'val_files': dataset_info['val_files'],
+            'processing_results': processing_results,
+            'total_points_generated': processing_results['total_points_generated']
+        }
+    
     def _discover_mesh_files(self):
         """
         Discover all mesh files in the raw data directory.
@@ -214,9 +402,22 @@ class CDataProcessor:
         if len(mesh_paths) == 0:
             return [], []
         elif len(mesh_paths) == 1:
-            # If only one file, put it in training
-            print("Warning: Only one file found, assigning to training set")
-            return mesh_paths, []
+            # If only one file, put it in training (and validation if same_shapes is True)
+            if self.use_same_shapes_for_val:
+                print("Using single file for both training and validation (DeepSDF style)")
+                return mesh_paths, mesh_paths
+            else:
+                print("Warning: Only one file found, assigning to training set")
+                return mesh_paths, []
+        
+        # NEW: Handle same shapes for train and validation
+        if self.use_same_shapes_for_val:
+            print(f"Using same {len(mesh_paths)} shapes for both training and validation (DeepSDF overfitting)")
+            # Sort paths for reproducible ordering
+            sorted_paths = sorted(mesh_paths)
+            return sorted_paths, sorted_paths
+        
+        # Original split logic for different train/val sets
         elif len(mesh_paths) == 2:
             # If only two files, one in each set
             print("Warning: Only two files found, one assigned to each set")
@@ -238,7 +439,7 @@ class CDataProcessor:
         
         print(f"Split: {len(train_files)} train, {len(val_files)} val (ratio: {self.train_val_split:.2f})")
         return train_files, val_files
-    
+
     def _process_single_mesh(self, mesh_path, split='train'):
         """
         Process a single mesh file using the PointCloudProcessor logic.
@@ -313,98 +514,3 @@ class CDataProcessor:
             'faces': faces,
             'split': split
         }
-        
-    def generate_sdf_dataset(self, z_dim=32, latent_mean=0.0, latent_sd=0.01):
-        """
-        Generate SDF dataset compatible with DeepSDF training pipeline.
-        Uses both PointCloudProcessor and VolumeProcessor outputs.
-        
-        Parameters:
-            z_dim (int): Latent vector dimension
-            latent_mean (float): Mean for latent vector initialization
-            latent_sd (float): Standard deviation for latent vector initialization
-            
-        Returns:
-            dict: Processing report containing dataset_info for SDF training
-        """
-        # First ensure data is processed
-        processing_results = self.process()
-        
-        # Get the device and resolution parameters from the VolumeProcessor
-        device = self.volume_processor.device
-        resolution = self.volume_processor.resolution
-        
-        # Get volume coordinates from VolumeProcessor
-        volume_coords = self.volume_processor._get_volume_coords(device=device, resolution=resolution)
-        
-        # Convert volume_coords tensor to numpy array (JSON serializable)
-        if hasattr(volume_coords, 'numpy'):
-            volume_coords_array = volume_coords.cpu().numpy()
-        elif hasattr(volume_coords, 'detach'):
-            volume_coords_array = volume_coords.detach().cpu().numpy()
-        elif isinstance(volume_coords, np.ndarray):
-            volume_coords_array = volume_coords
-        else:
-            # Fallback - convert to list
-            volume_coords_array = np.array(volume_coords.tolist()) if hasattr(volume_coords, 'tolist') else None
-        
-        # Create dataset metadata - only use serializable formats
-        dataset_info = {
-            'train_files': [],
-            'val_files': [],
-            'volume_coords': volume_coords_array,  # Use numpy array instead of tensor
-            'dataset_params': {
-                'z_dim': z_dim,
-                'latent_mean': latent_mean,
-                'latent_sd': latent_sd,
-                'num_samples': self.n_uniform + self.n_gaussian * 10,
-                'volume_coords_resolution': self.resolution,
-                'point_cloud_params': processing_results['processing_params']
-            },
-            'processing_results': processing_results
-        }
-        
-        # Collect train files
-        for i, mesh_name in enumerate(processing_results['train_files']):
-            points_file = processing_results['point_cloud_files']['train'][i]
-            distances_file = processing_results['signed_distance_files']['train'][i]
-            
-            dataset_info['train_files'].append({
-                'mesh_name': mesh_name,
-                'points_file': points_file,
-                'distances_file': distances_file,
-                'split': 'train'
-            })
-        
-        # Collect val files
-        for i, mesh_name in enumerate(processing_results['val_files']):
-            points_file = processing_results['point_cloud_files']['val'][i]
-            distances_file = processing_results['signed_distance_files']['val'][i]
-            
-            dataset_info['val_files'].append({
-                'mesh_name': mesh_name,
-                'points_file': points_file,
-                'distances_file': distances_file,
-                'split': 'val'
-            })
-        
-        print(f"Generated SDF dataset info:")
-        print(f"  Train files: {len(dataset_info['train_files'])}")
-        print(f"  Val files: {len(dataset_info['val_files'])}")
-        print(f"  Total points: {processing_results['total_points_generated']}")
-        print(f"  Volume resolution: {self.resolution}³")
-        print(f"  Volume coords shape: {volume_coords_array.shape if volume_coords_array is not None else 'None'}")
-        
-        # Return in the format expected by the pipeline orchestrator
-        return {
-            'status': 'success',
-            'dataset_info': dataset_info,  # ← Now fully JSON serializable
-            'processed_data_path': self.processed_data_path,
-            'train_files': dataset_info['train_files'],
-            'val_files': dataset_info['val_files'],
-            'processing_results': processing_results,
-            'total_points_generated': processing_results['total_points_generated']
-    }
-    
-
-    

@@ -8,6 +8,7 @@ import base64
 from pathlib import Path
 
 class CArtifactManager:
+
     def __init__(self, config):
         """
         Initialize the artifact manager with configuration parameters.

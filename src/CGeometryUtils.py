@@ -5,6 +5,7 @@ import meshio as meshio
 import polyscope as ps
 from pathlib import Path
 import igl
+import trimesh  
 
 """
    Functions for visualization and processing of meshes
@@ -207,3 +208,91 @@ class VolumeProcessor:
             range(self.volume_coords.shape[0]), num_samples, replace=False
         )
         return self.volume_coords[random_indices].cpu().numpy()
+
+def is_mesh_closed(vertices, faces):
+    """
+    Check if mesh is closed (watertight)
+    """
+    edges = set()
+    for face in faces:
+        for i in range(3):
+            edge = tuple(sorted([face[i], face[(i+1)%3]]))
+            if edge in edges:
+                edges.remove(edge)
+            else:
+                edges.add(edge)
+    return len(edges) == 0
+
+def triangle_mesh_to_volume(vertices, faces):
+    if not isinstance(vertices, np.ndarray):
+        vertices = np.array(vertices)
+    if not isinstance(faces, np.ndarray):
+        faces = np.array(faces)
+
+    is_closed = is_mesh_closed(vertices, faces)
+
+    if not is_closed:
+        raise ValueError("Mesh is not watertight, cannot compute volume")
+
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    volume = abs(mesh.volume)
+        
+    return volume, is_closed
+
+# Volume computation utility functions
+def compute_volume_from_mesh_file(mesh_file):
+    """
+    Compute volume directly from a mesh file
+    
+    Parameters:
+        mesh_file (str): Path to mesh file
+        
+    Returns:
+        float: Volume of the mesh
+    """
+    try:
+        # Load mesh using meshio (same as PointCloudProcessor)
+        mesh = meshio.read(mesh_file)
+        vertices = mesh.points.copy()
+        faces = mesh.cells[0].data
+        
+        # Compute volume using trimesh
+        volume, is_closed = triangle_mesh_to_volume(vertices, faces)
+        
+        if not is_closed:
+            print(f"Warning: Mesh {mesh_file} is not watertight, volume may be inaccurate")
+            
+        return volume
+        
+    except Exception as e:
+        print(f"Error computing volume for {mesh_file}: {e}")
+        return 0.0
+
+def compute_volumes_from_mesh_files(mesh_files):
+    """
+    Compute volumes for a list of mesh files
+    
+    Parameters:
+        mesh_files (list): List of mesh file paths
+        
+    Returns:
+        tuple: (volumes_list, mesh_name_to_volume_dict)
+            - volumes_list: List of volume values corresponding to each mesh
+            - mesh_name_to_volume_dict: Dictionary mapping mesh names to volumes
+    """
+    volumes = []
+    mesh_name_to_volume = {}
+    
+    print(f"Computing volumes for {len(mesh_files)} mesh files...")
+    
+    for i, mesh_file in enumerate(mesh_files):
+        volume = compute_volume_from_mesh_file(mesh_file)
+        volumes.append(volume)
+        
+        # Extract mesh name from file path
+        mesh_name = os.path.splitext(os.path.basename(mesh_file))[0]
+        mesh_name_to_volume[mesh_name] = volume
+        
+        print(f"  [{i+1}/{len(mesh_files)}] {mesh_name}: volume = {volume:.6f}")
+    
+    return volumes, mesh_name_to_volume
