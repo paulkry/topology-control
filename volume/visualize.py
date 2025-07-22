@@ -89,7 +89,7 @@ def visualize_2d_path(model, path=[]):
     predicted_volumes = model(latents).detach().cpu().numpy()
 
     # if path is empty just visualize the heatmap
-    if not path:
+    if path is None:
         _visualize_heatmap(xs, ys, predicted_volumes)
         return
 
@@ -130,6 +130,10 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.colorbar(label='Interpolated Z value')
     if pointsX is not None and pointsY is not None:
         plt.scatter(pointsX, pointsY, c='red', s=10, label='Original Data Points')
+
+    for i, (x, y) in enumerate(zip(pointsX, pointsY)):
+        plt.annotate(str(i), (x,y), fontsize=8, color='black')
+
     plt.title('2D Interpolated Grid')
     plt.xlabel('X-axis')
     plt.ylabel('Y-axis')
@@ -138,33 +142,34 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.show()
 
 if __name__ == "__main__":
-    # sdf_interpolator = SDF_interpolator()
-    # visualize_sdf(sdf_interpolator, latent=torch.tensor([0.5, 0.3]))
-
-    # from compute_path import compute_path, compute_path2
     from compute_path_opt import compute_path
     # from compute_path_with_geodesic import compute_geodesic_path
     from model import Latent2Volume
     from config import LATENT_DIM, DEV
 
-    # checkpoint = torch.load("checkpoints/latent2volume_best.pt", map_location=DEV)
-    # model = Latent2Volume(LATENT_DIM).to(DEV)
+    checkpoint = torch.load("checkpoints/latent2volume_best.pt", map_location=DEV)
+    model = Latent2Volume(LATENT_DIM).to(DEV)
 
-    # model.load_state_dict(checkpoint["model_state_dict"])
-    # model.eval()
-
-    # path = compute_path(torch.tensor([0, 10], dtype=torch.float32), torch.tensor([10, 10], dtype=torch.float32), model, 30)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+    
+    path = compute_path(
+        torch.tensor([2, 0], dtype=torch.float32).to(DEV),
+        torch.tensor([1, 4], dtype=torch.float32).to(DEV),
+        model,
+        10,
+        smooth_term_w=1e-5
+    ).cpu()
 
     # # print("Path found with length:", len(path))
     # path = [x.detach() for x in path]
-
-    # visualize_2d_path(model, path=path)
+    visualize_2d_path(model, path=path)
 
     # Visualizing the 3d shapes from the paths
-    model_path = os.path.join(VOLUME_DIR, "trained_deepsdfs", "sdfnet_model.pt")
-    deepsdf = torch.jit.load(model_path).to(DEV)
+    # model_path = os.path.join(VOLUME_DIR, "trained_deepsdfs", "sdfnet_model.pt")
+    # deepsdf = torch.jit.load(model_path).to(DEV)
 
-    path = [[0, 0], [10, 100]]
-    path = torch.tensor(path)
+    # path = [[0, 0], [10, 100]]
+    # path = torch.tensor(path)
 
-    visualize_interpolation_path(deepsdf, path, LATENT_FIRST)
+    visualize_interpolation_path(model, path, LATENT_FIRST)
