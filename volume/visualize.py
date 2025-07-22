@@ -131,6 +131,23 @@ def visualize_latent_vs_genera(path=os.path.join(VOLUME_DIR, "data", "2d_latents
     plt.axis('equal')
     plt.show()
 
+def visualize_classifier_res(model):
+    """
+    Given a classifier model, plot a heatmap for its prediction
+    on its 2d latent space.
+    """
+    lin = np.linspace(0, LATENT_VEC_MAX, 100)
+    grid_x, grid_y = np.meshgrid(lin, lin)
+    xs = grid_x.ravel()
+    ys = grid_y.ravel()
+    latents = torch.tensor(np.vstack((xs, ys)).T, dtype=torch.float32).to(DEV)
+
+    with torch.no_grad():
+        logits = model(latents)
+        preds = logits.argmax(dim=1).detach().cpu().numpy()
+
+    _visualize_heatmap(xs, ys, preds - 1)
+
 def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     """
     Visualize Z on XY-plane as a heatmap
@@ -150,8 +167,8 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     if pointsX is not None and pointsY is not None:
         plt.scatter(pointsX, pointsY, c='red', s=10, label='Original Data Points')
 
-    for i, (x, y) in enumerate(zip(pointsX, pointsY)):
-        plt.annotate(str(i), (x,y), fontsize=8, color='black')
+        for i, (x, y) in enumerate(zip(pointsX, pointsY)):
+            plt.annotate(str(i), (x,y), fontsize=8, color='black')
 
     plt.title('2D Interpolated Grid')
     plt.xlabel('X-axis')
@@ -165,10 +182,10 @@ if __name__ == "__main__":
     # visualize_latent_vs_genera()
     # visualize_sdf(sdf_interpolator, latent=torch.tensor([0.29890096, 0.16535072]))
 
-    # from compute_path import compute_path, compute_path2
+    # from compute_path import compute_path
     from compute_path_opt import compute_path
     # # from compute_path_with_geodesic import compute_geodesic_path
-    from model import Latent2Volume
+    from model import Latent2Volume, Latent2Genera
     from config import LATENT_DIM, DEV
 
     checkpoint = torch.load("checkpoints/latent2volume_best.pt", map_location=DEV)
