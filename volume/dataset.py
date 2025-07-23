@@ -28,6 +28,35 @@ class VolumeDataset(Dataset):
 
     def __len__(self):
         return self.size
+    
+class GeneraDataset(Dataset):
+
+    def __init__(self, dataset_path):
+        """
+            Expecting a npz file with two arrays:
+            latents and genera
+        """
+        self.file_path = dataset_path
+        data = np.load(dataset_path)
+        self.latents = torch.tensor(data["latents"], dtype=torch.float32)
+
+        genera = data["genera"]
+        gen_min, gen_max = np.min(genera), np.max(genera)
+        # Shift to make sure labels start from 0
+        shifted = genera - gen_min
+        self.genera = torch.tensor(shifted, dtype=torch.long)
+        self.num_classes = gen_max - gen_min + 1
+        self.size = self.latents.shape[0]
+
+    def __getitem__(self, idx):
+        return self.latents[idx], self.genera[idx]
+
+    def collate_fn(self, batch):
+        latents, genera = zip(*batch)
+        return torch.stack(latents), torch.stack(genera)
+
+    def __len__(self):
+        return self.size
 
 """"
 from scipy.interpolate import griddata

@@ -201,7 +201,7 @@ class CEvaluator:
                     level = 0.0
                     print(f"        Using zero level set (level=0.0)")
                 else:
-                    # Use a level that's within the range, typically the median or a small value
+                    # Use a level that's within the range typically the median or a small value
                     level = np.percentile(grid_sdf, 20)  # 20th percentile often works well
                     print(f"        Level {original_level} outside range [{sdf_min:.4f}, {sdf_max:.4f}]")
                     print(f"        Using level={level:.4f} (20th percentile)")
