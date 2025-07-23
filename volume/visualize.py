@@ -42,6 +42,8 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
 
 def construct_from_latent(model, latent, positioning, index, type):
     """
+    TODO: for deepsdf needs generate_mesh from the wrapper!
+
     Reconstruct the mesh from a latent vector using the model
     
     Parameters:
@@ -112,8 +114,8 @@ def visualize_latent_vs_genera(path=os.path.join(VOLUME_DIR, "data", "2d_latents
     latents = data["latents"]
     genera = data["genera"]
 
-    idx = np.where(genera == 3)[0][0]
-    print(latents[idx])
+    # idx = np.where(genera == 3)[0][0]
+    # print(latents[idx])
 
     plt.figure(figsize=(6, 6))
     cmap = ListedColormap(plt.get_cmap('tab10').colors[:5])

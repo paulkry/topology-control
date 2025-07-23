@@ -230,11 +230,11 @@ class CDataProcessor:
         train_count = max(1, int(len(sorted_paths) * self.train_val_split))
         
         # Ensure at least one file in validation if we have more than one file
-        if train_count >= len(sorted_paths):
-            train_count = len(sorted_paths) - 1
+        # if train_count >= len(sorted_paths):
+        #     train_count = len(sorted_paths) - 1
         
-        train_files = sorted_paths[:train_count]
-        val_files = sorted_paths[train_count:]
+        train_files = sorted_paths #[:train_count]
+        val_files = [] #sorted_paths[train_count:]
         
         print(f"Split: {len(train_files)} train, {len(val_files)} val (ratio: {self.train_val_split:.2f})")
         return train_files, val_files

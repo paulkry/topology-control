@@ -42,15 +42,28 @@ if __name__ == "__main__":
     #     dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
     # )
 
+    # current repo version:
     dataset = GeneraDataset(
         dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
     )
+    # DeepSDF adjusted version:
+    dataset = GeneraDataset(
+        dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes_deepsdf.npz")
+    )
     # model = Latent2Volume(LATENT_DIM).to(DEV)
+
+    # current repo version:
     model = Latent2Genera(LATENT_DIM, num_classes=dataset.num_classes, min_genus=dataset.min_genus).to(DEV)
+    # DeepSDF adjusted version:
+    model = Latent2Genera(16, num_classes=dataset.num_classes,).to(DEV)
+
     # crit = nn.L1Loss()
     crit = nn.CrossEntropyLoss()
     opt = optim.Adam(list(model.parameters()), lr=LR)
 
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
 
+    # current repo version:
     train_and_save(loader, model, crit, opt, "genera")
+    # DeepSDF adjusted version:
+    train_and_save(loader, model, crit, opt, "genera_deefsdf")
