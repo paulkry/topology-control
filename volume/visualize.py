@@ -76,7 +76,11 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
         update_frame = update_frame or slider_updated
         
         if update_frame:
-            ps_grid.add_scalar_quantity("sdf_values", all_sdf_values[curr_frame], 
+            latent = path[curr_frame]
+            sdf_values = predict_sdf(latent, coords, model, type)
+            sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
+            print(f"Current frame: {curr_frame}, Latent: {latent.cpu().numpy()}")
+            ps_grid.add_scalar_quantity("sdf_values", sdf_values, 
                                        defined_on='nodes',
                                        enable_isosurface_viz=True, 
                                        isosurface_level=0.0,
