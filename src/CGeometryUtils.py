@@ -95,8 +95,7 @@ class PointCloudProcessor:
         print('concat')
         sampled_points = np.concatenate((random_points, surface_points), axis=0)
         
-        # Add Gaussian noise if needed
-        from tqdm import tqdm
+                # Add Gaussian noise if needed
         if n_gaussian > 0 and sigma > 0:
             noise = np.random.normal(mu, sigma, (n_gaussian, surface_points.shape[0], 3))
             print("entering tqdm")

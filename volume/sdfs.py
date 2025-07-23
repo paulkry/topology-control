@@ -14,6 +14,20 @@ def sdf_torus(p, t = torch.tensor([0.35, 0.175])):
     q = torch.stack([pxz, p[..., 1]], dim=-1)
     return torch.norm(q, dim=-1) - t[1]
 
+def sdf_2_torus(p, t = torch.tensor([0.35, 0.175])):
+    """
+    Signed distance function for a genus-2-torus.
+    
+    p: (N, 3) tensor of 3D points
+    t: (2,) tensor with major and minor radius
+    """
+    x1 = p[..., 0:1] + 0.3
+    yz = p[..., 1:]
+    x2 = x1 - t[0] - t[1]                       
+    p1 = torch.cat([x1, yz], dim=-1)
+    p2 = torch.cat([x2, yz], dim=-1)
+    return torch.minimum(sdf_torus(p1, t), sdf_torus(p2, t))
+
 
 def sdf_solid_angle(p, c=torch.tensor([np.sin(np.pi/4), np.cos(np.pi/4)]), radius=0.7):
     """

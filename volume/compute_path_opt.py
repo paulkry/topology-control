@@ -1,4 +1,5 @@
 import torch
+from compute_path import compute_path as prelim_compute_path
 
 def compute_path(latent_A: torch.Tensor,
                  latent_B: torch.Tensor,
@@ -15,7 +16,13 @@ def compute_path(latent_A: torch.Tensor,
     """
     
     # initialize path as linear interpolation
-    zs = torch.stack([latent_A * (1 - t/steps) + latent_B * (t/steps) for t in range(steps+1)], dim=0)
+    lin = torch.linspace(0, 1, steps, device=latent_A.device)
+
+    zs = latent_A.unsqueeze(0) * (1 - lin).unsqueeze(1) + latent_B.unsqueeze(0) * lin.unsqueeze(1)
+
+    # comment out below line ofr original behavior
+    # zs = prelim_compute_path(latent_A, latent_B, model, steps)
+
     zs = zs.detach().clone().requires_grad_(True)  # (steps+1, d)
 
     optimizer = torch.optim.Adam([zs], lr=lr)
@@ -36,7 +43,7 @@ def compute_path(latent_A: torch.Tensor,
         
         optimizer.step()
 
-        # force endpoints consistensy, else it will blow out at each step
+        # force endpoints consistency, else it will blow out at each step
         with torch.no_grad():
             zs[0] = latent_A
             zs[-1] = latent_B
