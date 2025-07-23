@@ -116,13 +116,17 @@ class DeepSDF(torch.nn.Module):
     def __init__(self, config=None):
         super(DeepSDF, self).__init__()
         
+        # Handle configuration
         if config is None:
             config = {}
         
+        # Extract parameters with defaults (no hardcoded constants)
         self.z_dim = config.get('z_dim', 128)  # Latent vector dimension
         self.layer_size = config.get('layer_size', 256)  # Hidden layer dimension
+        self.dropout_p = config.get('dropout_p', 0.2)
         self.coord_dim = config.get('coord_dim', 3)  # 3D coordinates
         
+        # Store architecture info
         self.input_dim = self.z_dim + self.coord_dim
         self.output_dim = 1
         self.task = "signed_distance_prediction"
@@ -130,15 +134,18 @@ class DeepSDF(torch.nn.Module):
         # Build network layers
         input_dim = self.z_dim + self.coord_dim  # latent + coordinates
         
-        # Ensure layer_size is large enough for introducing a connectino skip
-        min_layer_size = max(self.layer_size, input_dim + 32)  
+        # Ensure layer_size is large enough for the skip connection architecture
+        min_layer_size = max(self.layer_size, input_dim + 32)  # Ensure sufficient capacity
         self.layer_size = min_layer_size
         
         self.input_layer = self.create_layer_block(input_dim, self.layer_size)
-        self.layer2 = self.create_layer_block(self.layer_size, self.layer_size - input_dim)
-        # Skip connection happens on layer 3 (concatenate with original input)
+        self.layer2 = self.create_layer_block(self.layer_size, self.layer_size)
         self.layer3 = self.create_layer_block(self.layer_size, self.layer_size)
-        self.output_layer = torch.nn.Linear(self.layer_size, 1)
+        self.layer4 = self.create_layer_block(self.layer_size, self.layer_size - input_dim)
+        self.layer5 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer6 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer7 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer8 = torch.nn.Linear(self.layer_size, 1)
         
         # Initialize weights
         self._initialize_weights()
@@ -159,7 +166,7 @@ class DeepSDF(torch.nn.Module):
 
     def forward(self, latent_vec, coords):
         """
-        Forward pass for DeepSDF - 4-layer architecture.
+        Forward pass for DeepSDF - simplified and robust.
         
         Args:
             latent_vec: Latent vector of shape [batch_size, z_dim]
@@ -194,13 +201,17 @@ class DeepSDF(torch.nn.Module):
         x = x.view(-1, x.shape[-1])
         skip_x_flat = skip_x.view(-1, skip_x.shape[-1])
         
-        # Forward pass through 4-layer network
-        x = self.input_layer(x) # [batch*coords, layer_size]
-        x = self.layer2(x) # [batch*coords, layer_size - input_dim]
+        # Forward pass through network
+        x = self.input_layer(x)                                    # [batch*coords, layer_size]
+        x = self.layer2(x)                                         # [batch*coords, layer_size]
+        x = self.layer3(x)                                         # [batch*coords, layer_size]
+        x = self.layer4(x)                                         # [batch*coords, layer_size - input_dim]
         
-        # Skip connection and concatenate with original input
-        x = self.layer3(torch.cat([x, skip_x_flat], dim=-1)) # [batch*coords, layer_size]
-        x = self.output_layer(x) # [batch*coords, 1]
+        # Skip connection: concatenate with original input
+        x = self.layer5(torch.cat([x, skip_x_flat], dim=-1))     # [batch*coords, layer_size]
+        x = self.layer6(x)                                         # [batch*coords, layer_size]
+        x = self.layer7(x)                                         # [batch*coords, layer_size]
+        x = self.layer8(x)                                         # [batch*coords, 1]
         
         # Reshape back to original batch structure
         # [batch*coords, 1] -> [batch_size, num_coords, 1] -> [batch_size, num_coords]
@@ -216,7 +227,9 @@ class DeepSDF(torch.nn.Module):
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         
         layer_info = []
-        for i, layer in enumerate([self.input_layer, self.layer2, self.layer3, self.output_layer]):
+        for i, layer in enumerate([self.input_layer, self.layer2, self.layer3, 
+                                  self.layer4, self.layer5, self.layer6, 
+                                  self.layer7, self.layer8]):
             if hasattr(layer, '__len__') and len(layer) > 0:
                 # Sequential layer block
                 linear_layer = layer[0]  # First layer is Linear
@@ -244,6 +257,7 @@ class DeepSDF(torch.nn.Module):
             'z_dim': self.z_dim,
             'coord_dim': self.coord_dim,
             'layer_size': self.layer_size,
+            'dropout_p': self.dropout_p,
             'total_parameters': total_params,
             'trainable_parameters': trainable_params,
             'layers': layer_info,
