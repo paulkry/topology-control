@@ -43,7 +43,7 @@ def predict_sdf(latent, coords, model, type=COORDS_FIRST):
     sdf_values = torch.tensor([], dtype=torch.float32).view(1, 0).to(DEV)
 
     # Split coords into batches because of memory limitations
-    coords_batches = torch.split(coords, 100000)
+    coords_batches = torch.split(coords, 100_000)
 
     model.eval()
     with torch.no_grad():

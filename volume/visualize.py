@@ -5,10 +5,12 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 from scipy.interpolate import griddata
 import os
+import pyvista as pv
 
 from compute_volume import get_volume_coords, generate_mesh
 from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
 from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX
+import polyscope.imgui as psim
 
 
 def visualize_sdf(sdf, latent = torch.tensor([0.1, 0.7]), type=COORDS_FIRST): 
@@ -24,47 +26,47 @@ def visualize_sdf(sdf, latent = torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
     ps.show()
 
 def visualize_interpolation_path(model, path, type=COORDS_FIRST):
-    """
-    Visualizing the meshes generated from each latent along the path by rendering them in a row.
-    Each shape is placed 2 units apart from the previous one to avoid overlap.
+    n_timestep = len(path)
+    curr_frame = 0
+    auto_playing = True
 
-    Parameters:
-        model: Trained DeepSDF model or SDF_interpolator object
-        path: List of latent vectors (torch.Tensor), e.g., from latent_A to latent_B
-    """
+    all_vertices = []
+    all_faces = []
+    coords, grid_size = get_volume_coords()
+
+    for i, latent in enumerate(path):
+        V, F = generate_mesh(latent, coords, grid_size, model, type)
+        all_vertices.append(V)
+        all_faces.append(F)
+
+    def myCallback():
+        nonlocal curr_frame, auto_playing
+
+        update_frame = False
+        _, auto_playing = psim.Checkbox("Autoplay", auto_playing)
+
+        if auto_playing:
+            update_frame = True
+            curr_frame = (curr_frame + 1) % n_timestep
+
+        slider_updated, curr_frame = psim.SliderInt("Current Shape", curr_frame, 0, n_timestep-1)
+        update_frame = update_frame or slider_updated
+
+        if update_frame:
+            if ps.has_surface_mesh("interpolated_shape"):
+                ps.remove_surface_mesh("interpolated_shape")
+            ps.register_surface_mesh("interpolated_shape", all_vertices[curr_frame], all_faces[curr_frame])
 
     ps.init()
     ps.set_up_dir("z_up")
-    for i, latent in enumerate(path):
-        V, F = construct_from_latent(model, latent, "helix", i, type)
-        ps.register_surface_mesh(f"path_{i+1}", V, F)
+
+    ps.set_automatically_compute_scene_extents(False)
+    ps.set_length_scale(1)
+
+    ps.set_user_callback(myCallback)
+    ps.register_surface_mesh("interpolated_shape", all_vertices[0], all_faces[0])
     ps.show()
 
-def construct_from_latent(model, latent, positioning, index, type):
-    """
-    Reconstruct the mesh from a latent vector using the model
-    
-    Parameters:
-        model: Trained DeepSDF model or SDF_interpolator object
-        latent: A latent vector
-        positioning: helix (circular) or row
-        index: the index used for angle or shift calculation
-    Returns:
-        vertices, faces
-    """
-    coords, grid_size = get_volume_coords()
-
-    vertices, faces = generate_mesh(latent, coords, grid_size, model, type)
-
-    if positioning == "row":
-        vertices[:, 0] += 2 * index
-    else:
-        angle = (index % 10) * 2 * np.pi / 10 
-        vertices[:, 0] += 3 * np.cos(angle)
-        vertices[:, 1] += 3 * np.sin(angle)
-        vertices[:, 2] += 0.2 * index
-    
-    return vertices, faces
 
 def visualize_2d_path(model, path=[]):
     """
@@ -72,8 +74,13 @@ def visualize_2d_path(model, path=[]):
         Also can be used to visualize the learned mapping from latent
         space to volume.
     """
-    lin = np.linspace(0, LATENT_VEC_MAX, 100)
-    grid_x, grid_y = np.meshgrid(lin, lin)
+    minix, miniy = path[:, 0].min(axis=0)[0], path[:, 1].min(axis=0)[0]
+    maxix, maxiy = path[:, 0].max(axis=0)[0], path[:, 1].max(axis=0)[0]
+
+    linx = np.linspace(minix-10, maxix+10, 100)
+    liny = np.linspace(miniy-10, maxiy+10, 100)
+
+    grid_x, grid_y = np.meshgrid(linx, liny)
     xs = grid_x.ravel()
     ys = grid_y.ravel()
     latents = torch.tensor(np.vstack((xs, ys)).T, dtype=torch.float32).to(DEV)
@@ -179,7 +186,7 @@ if __name__ == "__main__":
 
     # visualize_2d_path(model)
 
-    path = compute_path(torch.tensor([0, 1], dtype=torch.float32).to(DEV), torch.tensor([0.4, 0], dtype=torch.float32).to(DEV), model, 100, smooth_term_w=0.01)
+    path = compute_path(torch.tensor([0, 10], dtype=torch.float32).to(DEV), torch.tensor([10, 10], dtype=torch.float32).to(DEV), model, 20, smooth_term_w=0.01).cpu()
 
     print("Path found with length:", len(path))
 
@@ -192,4 +199,4 @@ if __name__ == "__main__":
     # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
     # path = torch.tensor(path, dtype=torch.float32)
 
-    # visualize_interpolation_path(sdf_interpolator, path, COORDS_FIRST)
+    visualize_interpolation_path(sdf_interpolator, path, COORDS_FIRST)
