@@ -7,64 +7,105 @@ from scipy.interpolate import griddata
 import os
 import pyvista as pv
 
-from compute_volume import get_volume_coords, generate_mesh
+from compute_volume import get_volume_coords, generate_mesh, predict_sdf
 from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
 from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX
 import polyscope.imgui as psim
 
 
-def visualize_sdf(sdf, latent = torch.tensor([0.1, 0.7]), type=COORDS_FIRST): 
+def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST): 
     """
-    Extract the mesh from an interpolated sdf/deepsdf and visualize it.
+    Extract the SDF values and visualize as an isosurface using Polyscope volume grid.
     """
     coords, grid_size = get_volume_coords()
-    vertices, faces = generate_mesh(latent, coords, grid_size, sdf, type)
-
+    
+    # Get SDF values instead of generating mesh
+    sdf_values = predict_sdf(latent, coords, sdf, type)
+    
+    # Convert to numpy and reshape to 3D grid
+    sdf_numpy = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
+    
+    # Define grid bounds (adjust these based on your coordinate system)
+    bound_low = coords.min(dim=0)[0].cpu().numpy()
+    bound_high = coords.max(dim=0)[0].cpu().numpy()
+    
     ps.init()
-    ps_sdf = ps.register_surface_mesh("sdf visualization", vertices, faces)
-
+    ps.set_up_dir("z_up")
+    
+    # Register the volume grid
+    ps_grid = ps.register_volume_grid("sdf_grid", grid_size, bound_low, bound_high)
+    
+    # Add scalar quantity with isosurface visualization enabled
+    ps_grid.add_scalar_quantity("sdf_values", sdf_numpy, defineenable_isosurface_viz=True, 
+                               isosurface_level=0.0,  # Zero level set for SDF
+                               isosurface_color=(0.2, 0.8, 0.2),
+                               enable_gridcube_viz=False)  # Hide grid cubes
+    
     ps.show()
+
+
+import polyscope.imgui as psim
 
 def visualize_interpolation_path(model, path, type=COORDS_FIRST):
     n_timestep = len(path)
     curr_frame = 0
     auto_playing = True
-
-    all_vertices = []
-    all_faces = []
+    
     coords, grid_size = get_volume_coords()
-
+    
+    all_sdf_values = []
     for i, latent in enumerate(path):
-        V, F = generate_mesh(latent, coords, grid_size, model, type)
-        all_vertices.append(V)
-        all_faces.append(F)
-
+        sdf_vals = predict_sdf(latent, coords, model, type)
+        sdf_numpy = sdf_vals.cpu().numpy().reshape((grid_size, grid_size, grid_size))
+        all_sdf_values.append(sdf_numpy)
+    
+    bound_low = coords.min(dim=0)[0].cpu().numpy()
+    bound_high = coords.max(dim=0)[0].cpu().numpy()
+    
     def myCallback():
         nonlocal curr_frame, auto_playing
-
+        
         update_frame = False
         _, auto_playing = psim.Checkbox("Autoplay", auto_playing)
-
+        
         if auto_playing:
             update_frame = True
             curr_frame = (curr_frame + 1) % n_timestep
-
+        
         slider_updated, curr_frame = psim.SliderInt("Current Shape", curr_frame, 0, n_timestep-1)
         update_frame = update_frame or slider_updated
-
+        
         if update_frame:
-            if ps.has_surface_mesh("interpolated_shape"):
-                ps.remove_surface_mesh("interpolated_shape")
-            ps.register_surface_mesh("interpolated_shape", all_vertices[curr_frame], all_faces[curr_frame])
-
+            ps_grid.add_scalar_quantity("sdf_values", all_sdf_values[curr_frame], 
+                                       defined_on='nodes',
+                                       enable_isosurface_viz=True, 
+                                       isosurface_level=0.0,
+                                       isosurface_color=(0.2, 0.8, 0.2),
+                                       enable_gridcube_viz=False,
+                                       enabled=True)
+    
     ps.init()
     ps.set_up_dir("z_up")
-
+    
     ps.set_automatically_compute_scene_extents(False)
     ps.set_length_scale(1)
-
+    
+    ps_grid = ps.register_volume_grid(
+        "interpolation_grid",
+        (grid_size, grid_size, grid_size),
+        bound_low,
+        bound_high
+    )
+    
+    ps_grid.add_scalar_quantity("sdf_values", all_sdf_values[0], 
+                               defined_on='nodes',
+                               enable_isosurface_viz=True, 
+                               isosurface_level=0.0,
+                               isosurface_color=(0.2, 0.8, 0.2),
+                               enable_gridcube_viz=False,
+                               enabled=True)
+    
     ps.set_user_callback(myCallback)
-    ps.register_surface_mesh("interpolated_shape", all_vertices[0], all_faces[0])
     ps.show()
 
 
