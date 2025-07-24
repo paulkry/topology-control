@@ -50,7 +50,6 @@ import polyscope.imgui as psim
 
 def visualize_interpolation_path(model, path, type=COORDS_FIRST):
     curr_frame = 0
-    auto_playing = True
     
     coords, grid_size = get_volume_coords()
     path_function = create_interpolation_function(path.cpu().numpy())
@@ -59,20 +58,21 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
     bound_high = coords.max(dim=0)[0].cpu().numpy()
     
     def myCallback():
-        nonlocal curr_frame, auto_playing
-        
-        update_frame = False
-        _, auto_playing = psim.Checkbox("Autoplay", auto_playing)
-        
-        if auto_playing:
-            update_frame = True
-            curr_frame = (curr_frame + 0.01) % 1
-        
-        slider_updated, curr_frame = psim.SliderFloat("Current Shape", curr_frame, 0, 1)
-        update_frame = update_frame or slider_updated
+        nonlocal curr_frame, latent
+
+        path_updated, curr_frame = psim.SliderFloat("Point in path", curr_frame, 0, 1)
+        if path_updated:
+            latent = path_function(curr_frame)
+
+        latent_updateds = []
+        for dim in range(path.shape[1]):
+            latent_updated, latent_value = psim.SliderFloat(f"Latent dim {dim}", latent[dim].item(), -LATENT_VEC_MAX, LATENT_VEC_MAX)
+            latent_updateds.append(latent_updated)
+            latent[dim] = latent_value
+
+        update_frame = path_updated or any(latent_updateds)
         
         if update_frame:
-            latent = path_function(curr_frame)
             sdf_values = predict_sdf(latent, coords, model, type)
             sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
             
@@ -99,8 +99,8 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
         bound_low,
         bound_high
     )
-
-    sdf_values = predict_sdf(path_function(0), coords, model, type)
+    latent = path_function(0)
+    sdf_values = predict_sdf(latent, coords, model, type)
     sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
 
     ps_grid.add_scalar_quantity(

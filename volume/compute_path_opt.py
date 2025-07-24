@@ -20,7 +20,7 @@ def compute_path(latent_A: torch.Tensor,
 
     zs = latent_A.unsqueeze(0) * (1 - lin).unsqueeze(1) + latent_B.unsqueeze(0) * lin.unsqueeze(1)
 
-    # comment out below line ofr original behavior
+    # comment out below line for original behavior
     # zs = prelim_compute_path(latent_A, latent_B, model, steps)
 
     zs = zs.detach().clone().requires_grad_(True)  # (steps+1, d)
