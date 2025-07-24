@@ -17,7 +17,7 @@ def create_interpolation_function(data_array):
     xp = np.linspace(0, 1, len(data_array))
 
     def interp_func(x):
-        return torch.tensor([np.interp(x, xp, data_array[:, latent_dim]) for latent_dim in range(data_array.shape[1])])
+        return torch.tensor([np.interp(x, xp, data_array[:, latent_dim]) for latent_dim in range(data_array.shape[1])], dtype=torch.float32)
 
     return interp_func
 
@@ -48,7 +48,7 @@ def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
 
 import polyscope.imgui as psim
 
-def visualize_interpolation_path(model, path, type=COORDS_FIRST):
+def visualize_interpolation_path(model, path, volume_regressor, type=COORDS_FIRST):
     curr_frame = 0
     
     coords, grid_size = get_volume_coords()
@@ -58,7 +58,9 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
     bound_high = coords.max(dim=0)[0].cpu().numpy()
     
     def myCallback():
-        nonlocal curr_frame, latent
+        nonlocal curr_frame, latent, pred_volume
+
+        psim.TextUnformatted(f"Predicted volume: {pred_volume:.4f}")
 
         path_updated, curr_frame = psim.SliderFloat("Point in path", curr_frame, 0, 1)
         if path_updated:
@@ -73,6 +75,7 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
         update_frame = path_updated or any(latent_updateds)
         
         if update_frame:
+            pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
             sdf_values = predict_sdf(latent, coords, model, type)
             sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
             
@@ -86,7 +89,7 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
                 enable_gridcube_viz=False,
                 enabled=True
             )
-    
+        
     ps.init()
     ps.set_up_dir("z_up")
     
@@ -99,7 +102,10 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
         bound_low,
         bound_high
     )
+
     latent = path_function(0)
+    pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
+
     sdf_values = predict_sdf(latent, coords, model, type)
     sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
 
@@ -127,8 +133,8 @@ def visualize_2d_path(model, path=[]):
     minix, miniy = path[:, 0].min(axis=0)[0], path[:, 1].min(axis=0)[0]
     maxix, maxiy = path[:, 0].max(axis=0)[0], path[:, 1].max(axis=0)[0]
 
-    linx = np.linspace(minix-10, maxix+10, 100)
-    liny = np.linspace(miniy-10, maxiy+10, 100)
+    linx = np.linspace(minix, maxix, 100)
+    liny = np.linspace(miniy, maxiy, 100)
 
     grid_x, grid_y = np.meshgrid(linx, liny)
     xs = grid_x.ravel()
@@ -136,7 +142,7 @@ def visualize_2d_path(model, path=[]):
     latents = torch.tensor(np.vstack((xs, ys)).T, dtype=torch.float32).to(DEV)
 
     predicted_volumes = model(latents).detach().cpu().numpy()
-
+    
     # if path is empty just visualize the heatmap
     if path is None:
         _visualize_heatmap(xs, ys, predicted_volumes)
@@ -246,18 +252,24 @@ if __name__ == "__main__":
     from config import LATENT_DIM, DEV
 
     checkpoint = torch.load("checkpoints/latent2volume_best.pt", map_location=DEV)
-    model = Latent2Volume(LATENT_DIM).to(DEV)
+    volume_regressor = Latent2Volume(LATENT_DIM).to(DEV)
 
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
+    volume_regressor.load_state_dict(checkpoint["model_state_dict"])
+    volume_regressor.eval()
 
     # visualize_2d_path(model)
 
-    path = compute_path(torch.tensor([0, 10], dtype=torch.float32).to(DEV), torch.tensor([10, 10], dtype=torch.float32).to(DEV), model, 20, smooth_term_w=0.01).cpu()
+    path = compute_path(
+        torch.tensor([0, 1], dtype=torch.float32).to(DEV),
+        torch.tensor([1, 0], dtype=torch.float32).to(DEV),
+        volume_regressor,
+        20,
+        smooth_term_w=0.01
+    ).cpu()
 
     print("Path found with length:", len(path))
 
-    visualize_2d_path(model, path=path)
+    visualize_2d_path(volume_regressor, path=path)
 
     # Visualizing the 3d shapes from the paths
     # model_path = os.path.join(VOLUME_DIR, "trained_deepsdfs", "sdfnet_model.pt")
@@ -266,4 +278,4 @@ if __name__ == "__main__":
     # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
     # path = torch.tensor(path, dtype=torch.float32)
 
-    visualize_interpolation_path(sdf_interpolator, path, COORDS_FIRST)
+    visualize_interpolation_path(sdf_interpolator, path, volume_regressor, COORDS_FIRST)
