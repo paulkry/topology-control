@@ -13,8 +13,15 @@ import numpy as np
 import os
 import time
 from glob import glob
+import math
+
 torch.set_default_dtype(torch.float32)
-from src.CArchitectureManager import DeepSDF
+
+
+###
+# LOSS FUNCTIONS
+###
+
 
 class SDFDataset(Dataset):
     """
@@ -44,7 +51,7 @@ class SDFDataset(Dataset):
         latent_mean = self.dataset_params['latent_mean']
         latent_sd = self.dataset_params['latent_sd']
         
-        self.latent_vectors = torch.randn(len(self.files), z_dim, device='cuda')
+        self.latent_vectors = torch.randn(len(self.files), z_dim)
         self.latent_vectors = (self.latent_vectors * latent_sd) + latent_mean
         self.latent_vectors.requires_grad = True
         
@@ -166,7 +173,7 @@ class CModelTrainer:
     
     def __init__(self, config):
         self.config = config
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = 'cpu'
         
         # Training parameters
         self.optimizer_name = config.get('optimizer', 'adam')
@@ -217,8 +224,8 @@ class CModelTrainer:
         Returns:
             tuple: (train_dataset, val_dataset)
         """
-        
-        if self.dataset_type == 'sdf' and dataset_info is not None:  # <- REMOVE the "and dataset_info is not None" condition
+
+        if self.dataset_type == 'sdf' or self.dataset_type == 'lipschitz_sdf':
             # Use SDFDataset - let it handle None dataset_info gracefully
             train_dataset = SDFDataset(dataset_info, split='train')
             val_dataset = SDFDataset(dataset_info, split='val')
@@ -389,13 +396,21 @@ class CModelTrainer:
             
             # Get latent vectors from dataset for SDF training
             if hasattr(train_dataset, 'latent_vectors'):
-                latent_vectors = train_dataset.latent_vectors #.to(self.device)
+                latent_data = train_dataset.latent_vectors.to(self.device)
+                latent_vectors = latent_data.clone().detach().requires_grad_(True)
                 optimizer = self._get_optimizer(model, latent_vectors)
                 print(f"✓ SDF training setup complete with dual learning rates")
             else:
                 print("⚠️  No latent vectors found in SDF dataset, using single learning rate")
                 optimizer = self._get_optimizer(model)
                 latent_vectors = None
+        elif self.dataset_type == 'lipschitz_sdf':
+            criterion = self._get_lipschitz_sdf_loss()
+
+            latent_data = train_dataset.latent_vectors.to(self.device)
+            latent_vectors = latent_data.clone().detach().requires_grad_(True)
+            optimizer = self._get_optimizer(model, latent_vectors)
+            print(f"✓ SDF training setup complete with dual learning rates")
         else:
             criterion = nn.MSELoss() if self.loss_function.lower() == 'mse' else nn.L1Loss()
             optimizer = self._get_optimizer(model)
@@ -459,6 +474,10 @@ class CModelTrainer:
                 val_loader, model, criterion, optimizer, 
                 is_training=False, epoch=epoch+1
             )
+
+            # Release cached memory that is no longer needed after validation
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
             epoch_time = time.time() - start_time
             
@@ -492,7 +511,6 @@ class CModelTrainer:
                   f"{' (Best Model)' if is_best else ''}")
             
             # Save checkpoints and models
-            # if epoch // self.save_frequency == 0:
             try:
                 # Always save latest checkpoint
                 latest_checkpoint = {
@@ -703,6 +721,29 @@ class CModelTrainer:
         
         return DeepSDFLoss(delta, latent_sd)
     
+    def _get_lipschitz_sdf_loss(self):
+        """Get loss function for Lipschitz-regularized SDF learning."""
+        delta = self.config.get('sdf_delta', 1.0)
+        latent_sd = self.config.get('latent_sd', 0.01)
+        
+        class LipschitzSDFLoss(nn.Module):
+            def __init__(self, delta, sd):
+                super().__init__()
+                self.delta = delta
+                self.sd = sd
+            
+            def forward(self, yhat, y, latent=None):
+                clamped_yhat = torch.clamp(yhat, -self.delta, self.delta)
+                clamped_y = torch.clamp(y, -self.delta, self.delta)
+                sdf_loss = torch.mean(torch.abs(clamped_yhat - clamped_y))
+                
+                if latent is not None:
+                    latent_loss = self.sd**2 * torch.mean(torch.linalg.norm(latent, dim=1, ord=2))
+                    return sdf_loss + latent_loss
+                return sdf_loss
+                
+        return LipschitzSDFLoss(delta, latent_sd)
+    
     def _get_optimizer(self, model, latent_vectors=None):
         """Get optimizer with separate learning rates for network and latent vectors."""
         
@@ -714,7 +755,7 @@ class CModelTrainer:
             if self.optimizer_name.lower() == 'adam':
                 optimizer = optim.Adam([
                     {"params": model.parameters(), "lr": lr_net},
-                    {"params": [latent_vectors], "lr": lr_latent}
+                    {"params": latent_vectors, "lr": lr_latent}
                 ])
             elif self.optimizer_name.lower() == 'adamw':
                 optimizer = optim.AdamW([
@@ -743,7 +784,7 @@ class CModelTrainer:
                 return optim.SGD(params, lr=lr, momentum=0.9)
             else:
                 return optim.Adam(params, lr=lr)  # Default
-    
+        
     def _run_epoch(self, data_loader, model, loss_fn, optimizer, is_training, epoch=1):
         """
         Run a single epoch of training or validation.
@@ -756,6 +797,8 @@ class CModelTrainer:
         total_loss = 0.0
         num_batches = 0
         
+        lambda_lip = self.config.get('lipschitz_lambda', 0.01)
+
         with torch.set_grad_enabled(is_training):
             for batch_idx, batch_data in enumerate(data_loader):
                 # Only handle SDF dataset: (coords, latents, sdfs)
@@ -771,22 +814,31 @@ class CModelTrainer:
                     # Flatten only for loss computation
                     outputs_flat = outputs.view(-1)  # [batch*num_points]
                     targets_flat = targets.view(-1)  # [batch*num_points]
-                    
-                    # Compute loss
-                    if hasattr(loss_fn, 'forward') and loss_fn.__class__.__name__ == 'DeepSDFLoss':
-                        loss = loss_fn(outputs_flat, targets_flat, latents)
+
+                    primary_loss = loss_fn(outputs_flat, targets_flat, latents)
+             
+                    if is_training and self.dataset_type == 'lipschitz_sdf' and hasattr(model, 'get_lipschitz_loss'):
+                        # Get the Lipschitz regularization term directly from the model.
+                        lipschitz_loss = model.get_lipschitz_loss()
+                        
+                        # 3. Combine the losses into the final total loss for backpropagation.
+                        total_loss_for_backward = primary_loss + lambda_lip * lipschitz_loss
                     else:
-                        loss = loss_fn(outputs_flat, targets_flat)
+                        # For validation or non-Lipschitz models, just use the primary loss.
+                        total_loss_for_backward = primary_loss
+                    
+                    
+                    if is_training:
+                        optimizer.zero_grad()
+                        total_loss_for_backward.backward()
+                        optimizer.step()
+                    
+                    total_loss += total_loss_for_backward.item()
+                    num_batches += 1
+
                 else:
                     raise ValueError(f"Expected SDF dataset with 3 elements (coords, latents, targets), got {len(batch_data)} elements")
                 
-                if is_training:
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                
-                total_loss += loss.item()
-                num_batches += 1
         
         return total_loss / num_batches if num_batches > 0 else 0.0
     
@@ -827,7 +879,7 @@ class CModelTrainer:
             
             plt.figure(figsize=(10, 6))
             plt.plot(epochs, train_losses, 'o-', label='Training Loss', alpha=0.8)
-            # plt.plot(epochs, val_losses, 's-', label='Validation Loss', alpha=0.8)
+            plt.plot(epochs, val_losses, 's-', label='Validation Loss', alpha=0.8)
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
             plt.title(f'Training and Validation Loss - {self.dataset_type.upper()} Dataset')

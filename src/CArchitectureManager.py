@@ -1,8 +1,116 @@
 import torch
+import math
 
 # ============================================================================
 # Models
 # ============================================================================
+
+
+class LipschitzLinear(torch.nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = torch.nn.Parameter(torch.empty((out_features, in_features), requires_grad=True))
+        self.bias = torch.nn.Parameter(torch.empty((out_features), requires_grad=True))
+        self.c = torch.nn.Parameter(torch.empty((1), requires_grad=True))
+        self.softplus = torch.nn.Softplus()
+        self.initialize_parameters()
+
+    def initialize_parameters(self):
+        stdv = 1. / math.sqrt(self.weight.size(1))
+        self.weight.data.uniform_(-stdv, stdv)
+        if self.bias is not None:
+            self.bias.data.uniform_(-stdv, stdv)
+
+        W = self.weight.data
+        W_abs_row_sum = torch.abs(W).sum(1)
+        self.c.data = W_abs_row_sum.max()
+
+    def get_lipschitz_constant(self):
+        return self.softplus(self.c)
+
+    def forward(self, input):
+        lipc = self.softplus(self.c)
+        scale = lipc / torch.abs(self.weight).sum(1)
+        scale = torch.clamp(scale, max=1.0)
+        return torch.nn.functional.linear(input, self.weight * scale.unsqueeze(1), self.bias)
+
+class LipschitzDeepSDF(torch.nn.Module):
+
+    def __init__(self, config=None):
+        super(LipschitzDeepSDF, self).__init__()
+
+        if config is None:
+            config = {}
+
+        self.z_dim = config.get('z_dim', 128)
+        self.layer_size = config.get('layer_size', 256)
+        self.coord_dim = config.get('coord_dim', 3)
+
+        self.input_dim = self.z_dim + self.coord_dim
+        
+        min_layer_size = max(self.layer_size, self.input_dim + 32)
+        self.layer_size = min_layer_size
+
+        self.input_layer = self.create_layer_block(self.input_dim, self.layer_size)
+        self.layer2 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer3 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer4 = self.create_layer_block(self.layer_size, self.layer_size - self.input_dim)
+        self.layer5 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer6 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer7 = self.create_layer_block(self.layer_size, self.layer_size)
+        self.layer8 = LipschitzLinear(self.layer_size, 1) # Final layer is also Lipschitz
+
+    def create_layer_block(self, input_size, output_size):
+        return torch.nn.Sequential(
+            LipschitzLinear(input_size, output_size),
+            torch.nn.ReLU(),
+        )
+
+    def get_lipschitz_loss(self):
+        """
+        Computes the product of the Lipschitz constants of all LipschitzLinear layers.
+        This serves as the regularization term to be added to the main loss.
+        """
+        loss_lipc = 1.0
+        for module in self.modules():
+            if isinstance(module, LipschitzLinear):
+                loss_lipc = loss_lipc * module.get_lipschitz_constant()
+        return loss_lipc
+
+    def forward(self, latent_vec, coords):
+        if latent_vec.dim() != 2:
+            raise ValueError(f"latent_vec must be 2D [batch_size, z_dim], got shape {latent_vec.shape}")
+        if coords.dim() != 3:
+            raise ValueError(f"coords must be 3D [batch_size, num_coords, 3], got shape {coords.shape}")
+
+        batch_size, num_coords, _ = coords.shape
+        z_dim = latent_vec.shape[1]
+
+        latent_expanded = latent_vec.unsqueeze(1).expand(batch_size, num_coords, z_dim)
+        x = torch.cat([latent_expanded, coords], dim=-1)
+        
+        skip_x = x
+        
+        original_shape = x.shape
+        x = x.view(-1, x.shape[-1])
+        skip_x_flat = skip_x.view(-1, skip_x.shape[-1])
+        
+        x = self.input_layer(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        
+        x = self.layer5(torch.cat([x, skip_x_flat], dim=-1))
+        x = self.layer6(x)
+        x = self.layer7(x)
+        x = self.layer8(x)
+        
+        x = x.view(original_shape[0], original_shape[1], -1)
+        x = x.squeeze(-1)
+        
+        return x.tanh()
 
 class SimpleMLP(torch.nn.Module):
     def __init__(self, input_dim=3, hidden_dims=[128, 64, 32], output_dim=1, activation='relu', dropout=0.1):
@@ -276,6 +384,7 @@ class CArchitectureManager:
         self.architecture_registry = {
             'mlp': SimpleMLP,
             'deepsdf': DeepSDF,
+            'lipschitz_deepsdf': LipschitzDeepSDF,
         }
     
     def get_model(self, device=None):
@@ -302,6 +411,12 @@ class CArchitectureManager:
                     'dropout': self.config.get('dropout', 0.1)
                 }
             elif architecture_name == 'deepsdf':
+                architecture_config = {
+                    'z_dim': self.config.get('z_dim', 256),
+                    'layer_size': self.config.get('layer_size', 32),
+                    'coord_dim': self.config.get('coord_dim', 3)
+                }
+            elif architecture_name == 'lipschitz_deepsdf':
                 architecture_config = {
                     'z_dim': self.config.get('z_dim', 256),
                     'layer_size': self.config.get('layer_size', 32),

@@ -19,7 +19,8 @@ class CDataProcessor:
                 - train_val_split: float between 0 and 1 for train/validation split ratio
         """
         self.config = config
-        
+        self.use_train_for_val = config.get('use_train_for_val', False)
+
         # Extract paths from config
         dataset_paths = config.get('dataset_paths', {})
         raw_path = dataset_paths.get('raw', 'data/raw')
@@ -200,44 +201,27 @@ class CDataProcessor:
 
     def _split_files(self, mesh_paths):
         """
-        Split mesh files into train and validation sets.
-        
-        Parameters:
-            mesh_paths (list): List of mesh file paths
-            
-        Returns:
-            tuple: (train_files, val_files)
+        Split mesh files into train and validation sets,
+        or replicate train into val if use_train_for_val is set.
         """
-        import random
-        
-        # Handle edge cases
-        if len(mesh_paths) == 0:
-            return [], []
-        elif len(mesh_paths) == 1:
-            # If only one file, put it in training
-            print("Warning: Only one file found, assigning to training set")
-            return mesh_paths, []
-        elif len(mesh_paths) == 2:
-            # If only two files, one in each set
-            print("Warning: Only two files found, one assigned to each set")
-            return [mesh_paths[0]], [mesh_paths[1]]
-        
-        # For multiple files, use the split ratio
-        # Sort paths for reproducible splits
-        sorted_paths = sorted(mesh_paths)
-        
-        # Calculate split index
-        train_count = max(1, int(len(sorted_paths) * self.train_val_split))
-        
-        # Ensure at least one file in validation if we have more than one file
-        # if train_count >= len(sorted_paths):
-        #     train_count = len(sorted_paths) - 1
-        
-        train_files = sorted_paths #[:train_count]
-        val_files = [] #sorted_paths[train_count:]
-        
-        print(f"Split: {len(train_files)} train, {len(val_files)} val (ratio: {self.train_val_split:.2f})")
-        return train_files, val_files
+        if self.use_train_for_val:
+            print("⚙️  use_train_for_val is True – using full dataset for both training and validation.")
+            return mesh_paths, mesh_paths  # Same set for both
+        else:
+            import random
+            if len(mesh_paths) == 0:
+                return [], []
+            elif len(mesh_paths) == 1:
+                return mesh_paths, []
+            elif len(mesh_paths) == 2:
+                return [mesh_paths[0]], [mesh_paths[1]]
+            
+            sorted_paths = sorted(mesh_paths)
+            train_count = max(1, int(len(sorted_paths) * self.train_val_split))
+            train_files = sorted_paths[:train_count]
+            val_files = sorted_paths[train_count:]
+            print(f"Split: {len(train_files)} train, {len(val_files)} val (ratio: {self.train_val_split:.2f})")
+            return train_files, val_files
     
     def _process_single_mesh(self, mesh_path, split='train'):
         """

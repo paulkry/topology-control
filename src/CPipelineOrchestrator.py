@@ -150,7 +150,7 @@ class CPipelineOrchestrator:
         trainer_config = self.config.get('trainer_config', {})
         dataset_type = trainer_config.get('dataset_type', 'shape')
         
-        if dataset_type == 'sdf':
+        if dataset_type == 'sdf' or dataset_type == 'lipschitz_sdf':
             # For SDF datasets, generate SDF dataset with proper dataset_info
             print("   Generating SDF dataset...")
             
