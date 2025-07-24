@@ -12,6 +12,14 @@ from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
 from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX
 import polyscope.imgui as psim
 
+def create_interpolation_function(data_array):
+    # converts array into continuous function between 0 and 1
+    xp = np.linspace(0, 1, len(data_array))
+
+    def interp_func(x):
+        return torch.tensor([np.interp(x, xp, data_array[:, latent_dim]) for latent_dim in range(data_array.shape[1])])
+
+    return interp_func
 
 def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST): 
     """
@@ -19,23 +27,17 @@ def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
     """
     coords, grid_size = get_volume_coords()
     
-    # Get SDF values instead of generating mesh
     sdf_values = predict_sdf(latent, coords, sdf, type)
-    
-    # Convert to numpy and reshape to 3D grid
     sdf_numpy = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
     
-    # Define grid bounds (adjust these based on your coordinate system)
     bound_low = coords.min(dim=0)[0].cpu().numpy()
     bound_high = coords.max(dim=0)[0].cpu().numpy()
     
     ps.init()
     ps.set_up_dir("z_up")
     
-    # Register the volume grid
     ps_grid = ps.register_volume_grid("sdf_grid", grid_size, bound_low, bound_high)
     
-    # Add scalar quantity with isosurface visualization enabled
     ps_grid.add_scalar_quantity("sdf_values", sdf_numpy, defineenable_isosurface_viz=True, 
                                isosurface_level=0.0,  # Zero level set for SDF
                                isosurface_color=(0.2, 0.8, 0.2),
@@ -47,17 +49,11 @@ def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
 import polyscope.imgui as psim
 
 def visualize_interpolation_path(model, path, type=COORDS_FIRST):
-    n_timestep = len(path)
     curr_frame = 0
     auto_playing = True
     
     coords, grid_size = get_volume_coords()
-    
-    all_sdf_values = []
-    for i, latent in enumerate(path):
-        sdf_vals = predict_sdf(latent, coords, model, type)
-        sdf_numpy = sdf_vals.cpu().numpy().reshape((grid_size, grid_size, grid_size))
-        all_sdf_values.append(sdf_numpy)
+    path_function = create_interpolation_function(path.cpu().numpy())
     
     bound_low = coords.min(dim=0)[0].cpu().numpy()
     bound_high = coords.max(dim=0)[0].cpu().numpy()
@@ -70,23 +66,26 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
         
         if auto_playing:
             update_frame = True
-            curr_frame = (curr_frame + 1) % n_timestep
+            curr_frame = (curr_frame + 0.01) % 1
         
-        slider_updated, curr_frame = psim.SliderInt("Current Shape", curr_frame, 0, n_timestep-1)
+        slider_updated, curr_frame = psim.SliderFloat("Current Shape", curr_frame, 0, 1)
         update_frame = update_frame or slider_updated
         
         if update_frame:
-            latent = path[curr_frame]
+            latent = path_function(curr_frame)
             sdf_values = predict_sdf(latent, coords, model, type)
             sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
-            print(f"Current frame: {curr_frame}, Latent: {latent.cpu().numpy()}")
-            ps_grid.add_scalar_quantity("sdf_values", sdf_values, 
-                                       defined_on='nodes',
-                                       enable_isosurface_viz=True, 
-                                       isosurface_level=0.0,
-                                       isosurface_color=(0.2, 0.8, 0.2),
-                                       enable_gridcube_viz=False,
-                                       enabled=True)
+            
+            ps_grid.add_scalar_quantity(
+                "sdf_values",
+                sdf_values, 
+                defined_on='nodes',
+                enable_isosurface_viz=True, 
+                isosurface_level=0.0,
+                isosurface_color=(0.2, 0.8, 0.2),
+                enable_gridcube_viz=False,
+                enabled=True
+            )
     
     ps.init()
     ps.set_up_dir("z_up")
@@ -100,14 +99,20 @@ def visualize_interpolation_path(model, path, type=COORDS_FIRST):
         bound_low,
         bound_high
     )
-    
-    ps_grid.add_scalar_quantity("sdf_values", all_sdf_values[0], 
-                               defined_on='nodes',
-                               enable_isosurface_viz=True, 
-                               isosurface_level=0.0,
-                               isosurface_color=(0.2, 0.8, 0.2),
-                               enable_gridcube_viz=False,
-                               enabled=True)
+
+    sdf_values = predict_sdf(path_function(0), coords, model, type)
+    sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
+
+    ps_grid.add_scalar_quantity(
+        "sdf_values",
+        sdf_values,
+        defined_on='nodes',
+        enable_isosurface_viz=True, 
+        isosurface_level=0.0,
+        isosurface_color=(0.2, 0.8, 0.2),
+        enable_gridcube_viz=False,
+        enabled=True
+    )
     
     ps.set_user_callback(myCallback)
     ps.show()
