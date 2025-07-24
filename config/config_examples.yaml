@@ -26,7 +26,7 @@ processor_config:
 
 model_config:
   skip_building: false
-  model_name: deepsdf
+  model_name: lipschitz_deepsdf #deepsdf
   # DeepSDF specific parameters matching your notebook
   z_dim: 16  # Z_DIM = 16 from your notebook
   layer_size: 124  # HIDDEN_DIM = 64 from your notebook
@@ -36,13 +36,14 @@ model_config:
 trainer_config:
   skip_training: false
   processed_data_path: *processed_data_path
-  dataset_type: sdf  # Important: specify SDF dataset type
+  dataset_type: lipschitz_sdf  #sdf 
+  lipschitz_lambda: 0.000001
   loss_function: deepsdf  # Use custom DeepSDF loss
   optimizer: adam
   network_learning_rate: 0.001  # lr=1e-3 from your notebook
   latent_learning_rate: 0.01
   batch_size: 8  # BATCH_SIZE = 16 from your notebook
-  num_epochs: 50000  # max_epochs=20 from your notebook
+  num_epochs: 10000  # max_epochs=20 from your notebook
   max_points: 300000  # Allow more points for better SDF learning
   
   # DeepSDF specific training parameters
