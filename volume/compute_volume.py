@@ -11,9 +11,7 @@ from tqdm import tqdm
 from sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
 from config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
 
-def generate_mesh(latent_code, coords, grid_size, model, type=COORDS_FIRST):
-    sdf = predict_sdf(latent_code, coords, model, type).flatten()
-
+def generate_mesh_from_sdf(sdf, coords, grid_size):
     vertices, faces, e2v = igl.marching_cubes(
         sdf.cpu().numpy(), 
         coords.cpu().numpy(), 
@@ -22,12 +20,19 @@ def generate_mesh(latent_code, coords, grid_size, model, type=COORDS_FIRST):
 
     return vertices, faces
 
+
+def generate_mesh_from_latent(latent_code, coords, grid_size, model, type=COORDS_FIRST):
+    sdf = predict_sdf(latent_code, coords, model, type).flatten()
+    vertices, faces = generate_mesh_from_sdf(sdf, coords, grid_size)
+
+    return vertices, faces
+
     
 def get_volume_coords(resolution = 50):
     """Get 3-dimensional vector (M, N, P) according to the desired resolutions
     on the [-1, 1]^3 cube"""
     # Define grid
-    grid_values = torch.arange(-1, 1, float(1/resolution)).to(DEV) # e.g. 50 resolution -> 1/50 
+    grid_values = torch.arange(-.7, .7, float(1/resolution)).to(DEV) # e.g. 50 resolution -> 1/50 
     grid = torch.meshgrid(grid_values, grid_values, grid_values)
     
     grid_size_axis = grid_values.shape[0]
@@ -49,7 +54,7 @@ def predict_sdf(latent, coords, model, type=COORDS_FIRST):
     with torch.no_grad():
         for coords in coords_batches:
             if type==COORDS_FIRST:
-                latent_batch = latent.unsqueeze(0)
+                latent_batch = latent.unsqueeze(0).to(DEV)
                 sdf_batch = model(latent_batch, coords)
             elif type==LATENT_FIRST:
                 # expects a tiled latent vec
@@ -151,7 +156,7 @@ def generate_latent_volume_data(n, model):
     coords, grid_size = get_volume_coords()
 
     for i, latent in enumerate(tqdm(latents)):
-        vertices, faces = generate_mesh(latent, coords, grid_size, model, LATENT_FIRST)
+        vertices, faces = generate_mesh_from_latent(latent, coords, grid_size, model, LATENT_FIRST)
         volumes.append(compute_volume(vertices, faces))
         genera.append(compute_genus(vertices, faces))
 
@@ -176,7 +181,7 @@ def generate_syn_latent_volume_data(num_samples):
         beta = torch.rand(1).item() * (1 - alpha)  # ensure alpha + beta ≤ 1
         latents.append((alpha, beta))
         assert 0.0 <= alpha + beta <= 1.0
-        vertices, faces = generate_mesh(torch.tensor([alpha, beta]), coords, grid_size, interpolator)
+        vertices, faces = generate_mesh_from_latent(torch.tensor([alpha, beta]), coords, grid_size, interpolator)
 
         volume = compute_volume(vertices, faces)
         genus = compute_genus(vertices, faces)
