@@ -89,6 +89,57 @@ def compute_volume(vertices, faces):
         
     return volume
 
+    #start regularization to preserve topology and optimize path in latent space
+def L_topology(latent, coords, model, type=COORDS_FIRST):
+    sdf = predict_sdf(latent, coords, model, type)
+    grad_outputs = torch.ones_like(sdf, requires_grad=False)
+    grads = torch.autograd.grad(
+        outputs=sdf,
+        inputs=coords,
+        grad_outputs=grad_outputs,
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
+    )[0]
+    laplacian = torch.sum((grads.norm(dim=1) - 1) ** 2)
+    return laplacian
+
+def L_path(latents: List[torch.Tensor], coords, model, type=COORDS_FIRST):
+    losses = []
+    for z_t in latents:
+        losses.append(L_topology(z_t, coords, model, type))
+    return torch.mean(torch.stack(losses))
+
+def L_components(vertices, faces):
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    n_components = len(mesh.split(only_watertight=False))
+    return (n_components - 1) ** 2
+
+    
+def L_path_smoothness(latents, coords, model, type=COORDS_FIRST):
+    diffs = [torch.norm(latents[i+1] - latents[i])**2 for i in range(len(latents) - 1)]
+    return torch.mean(torch.stack(diffs))
+
+def L_latent_path_length(latents):
+    lengths = [torch.norm(latents[i+1] - latents[i]) for i in range(len(latents) - 1)]
+    return torch.sum(torch.stack(lengths))
+
+def L_sdf_consistency(latents, coords, model, type=COORDS_FIRST):
+    sdf_values = [predict_sdf(z, coords, model, type) for z in latents]
+    diffs = [torch.norm(sdf_values[i+1] - sdf_values[i])**2 for i in range(len(sdf_values) - 1)]
+    return torch.mean(torch.stack(diffs))
+
+    #Regularization sum  for topology, SDF gradient smoothness on path, SDF value consistency, length reg. 
+def L_path_combined(latents, coords, model, type=COORDS_FIRST, alpha=1.0, beta=1.0, gamma=1.0):
+    topology_loss = L_path(latents, coords, model, type)
+    smoothness_loss = L_path_smoothness(latents, coords, model, type)
+    latent_length_loss = L_latent_path_length(latents)
+    sdf_consistency_loss = L_sdf_consistency(latents, coords, model, type)
+    return (alpha * topology_loss +
+            beta * smoothness_loss +
+            gamma * sdf_consistency_loss +
+            0.1 * latent_length_loss)
+
 def generate_latent_volume_data(n, model):
     # sample from uniform(0, 10)
     latents = torch.rand(n, LATENT_DIM) * 10
