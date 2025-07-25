@@ -217,10 +217,10 @@ class CDataProcessor:
             # If only one file, put it in training
             print("Warning: Only one file found, assigning to training set")
             return mesh_paths, []
-        elif len(mesh_paths) == 2:
-            # If only two files, one in each set
-            print("Warning: Only two files found, one assigned to each set")
-            return [mesh_paths[0]], [mesh_paths[1]]
+        # elif len(mesh_paths) == 2:
+        #     # If only two files, one in each set
+        #     print("Warning: Only two files found, one assigned to each set")
+        #     return [mesh_paths[0]], [mesh_paths[1]]
         
         # For multiple files, use the split ratio
         # Sort paths for reproducible splits
@@ -232,7 +232,7 @@ class CDataProcessor:
         # Ensure at least one file in validation if we have more than one file
         # if train_count >= len(sorted_paths):
         #     train_count = len(sorted_paths) - 1
-        
+        print("???>>>>>>>>>>>>>>>>>>>>>>>>>>.sorted_paths", sorted_paths)
         train_files = sorted_paths #[:train_count]
         val_files = [] #sorted_paths[train_count:]
         

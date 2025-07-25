@@ -43,7 +43,7 @@ trainer_config:
   network_learning_rate: 0.001  # lr=1e-3 from your notebook
   latent_learning_rate: 0 #0.01
   batch_size: 8  # BATCH_SIZE = 16 from your notebook
-  num_epochs: 10000  # max_epochs=20 from your notebook
+  num_epochs: 1000  # max_epochs=20 from your notebook
   max_points: 300000  # Allow more points for better SDF learning
   
   # DeepSDF specific training parameters
