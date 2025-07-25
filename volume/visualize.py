@@ -14,7 +14,7 @@ import polyscope.imgui as psim
 
 def set_color(alpha, tolerance=0.1):
     # low tolerance means shape will go to red more quickly
-    
+
     error = abs(1-alpha)**tolerance
     print(error)
     ret = np.array((error, 1-error, 0))
@@ -52,7 +52,7 @@ def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
 
 import polyscope.imgui as psim
 
-def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FIRST):
+def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_regressor, type=COORDS_FIRST):
     curr_frame = 0
     
     coords, grid_size = get_volume_coords()
@@ -64,10 +64,12 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
     ps_mesh = None
     
     def myCallback():
-        nonlocal curr_frame, latent, pred_volume, volume, current_V, current_F, ps_mesh
+        nonlocal curr_frame, latent, pred_volume, volume, current_V, current_F, ps_mesh, pred_genus, genus
 
         psim.TextUnformatted(f"Predicted volume: {pred_volume:.4f}")
         psim.TextUnformatted(f"Actual volume: {volume:.2f}")
+        psim.TextUnformatted(f"Predicted genus: {pred_genus:.4f}")
+        psim.TextUnformatted(f"Actual genus: {genus:.2f}")
 
         path_updated, curr_frame = psim.SliderFloat("Point in path", curr_frame, 0, 1)
         if path_updated:
@@ -83,6 +85,7 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
         
         if update_frame:
             pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
+            pred_genus = genus_regressor(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
 
             sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
             current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
@@ -103,11 +106,17 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
     
     # Initial visualization
     latent = path_function(0)
-    pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
+
 
     sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
     current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
+
     volume = compute_volume(current_V, current_F).item()
+    genus = compute_genus(current_V, current_F)
+
+    pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
+    pred_genus = genus_regressor(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
+
     AVG_VOLUME = volume
     volume_fraction = volume / AVG_VOLUME
     
@@ -246,11 +255,15 @@ if __name__ == "__main__":
      # from compute_path_with_geodesic import compute_geodesic_path
     from model import Latent2Volume, Latent2Genera
 
-    checkpoint = torch.load("checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)
+    checkpoint = torch.load("checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)["model_state_dict"]
     volume_regressor = Latent2Volume(LATENT_DIM).to(DEV)
-
-    volume_regressor.load_state_dict(checkpoint["model_state_dict"])
+    volume_regressor.load_state_dict(checkpoint)
     volume_regressor.eval()
+
+    checkpoint = torch.load("checkpoints/latent2genera_best.pt", map_location=DEV)["model_state_dict"]
+    genus_regressor = Latent2Genera(LATENT_DIM).to(DEV)
+    genus_regressor.load_state_dict(checkpoint)
+    genus_regressor.eval()
 
     # visualize_2d_path(model)
 
@@ -272,4 +285,4 @@ if __name__ == "__main__":
     # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
     # path = torch.tensor(path, dtype=torch.float32)
 
-    visualize_interpolation_path(deepsdf, path, volume_regressor, LATENT_FIRST)
+    visualize_interpolation_path(deepsdf, path, volume_regressor, genus_regressor, LATENT_FIRST)

@@ -198,24 +198,11 @@ def generate_syn_latent_volume_data(num_samples):
 
 
 if __name__ == "__main__":
-
-    #----------------------------------------------------------------
-    # Making sure SDFs produce similar volumes
-    # interpolator = SDF_interpolator()
-    # volumes = []
-    # coords, grid_size = get_volume_coords(resolution=50)
-
-    # for alpha, beta in [(1, 0), (0, 1), (0, 0)]:
-    #     volume = compute_volume(torch.tensor([alpha, beta]), coords, grid_size, interpolator)
-    #     volumes.append(volume)
-
-    # print(volumes)
-
     #----------------------------------------------------------------
     # Data Generation
     model_path = "trained_deepsdfs/sdfnet_model.pt"
     scripted_model = torch.jit.load(model_path).to(DEV)
 
-    # generate_latent_volume_data(2000, scripted_model)
-    generate_syn_latent_volume_data(2000)
+    generate_latent_volume_data(2000, scripted_model)
+    # generate_syn_latent_volume_data(2000)
     
