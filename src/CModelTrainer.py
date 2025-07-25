@@ -270,63 +270,7 @@ class CModelTrainer:
         )
         
         return train_loader, val_loader
-        
-    def save_checkpoint(self, model, optimizer, epoch, train_loss, val_loss, 
-                       is_best=False, latent_vectors=None, dataset_info=None):
-        """
-        Save model checkpoint to disk.
-        
-        Args:
-            model: PyTorch model
-            optimizer: Optimizer state
-            epoch: Current epoch
-            train_loss: Training loss
-            val_loss: Validation loss
-            is_best: Whether this is the best model so far
-            latent_vectors: Latent vectors for SDF models
-            dataset_info: Dataset information for SDF models
-        """
-        # Prepare checkpoint data
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            'config': self.config,
-            'dataset_type': self.dataset_type,
-            'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
-        }
-        
-        # Add latent vectors for SDF models
-        if latent_vectors is not None:
-            checkpoint['latent_vectors'] = latent_vectors.detach().cpu()
-        
-        # Add dataset info for reproducibility
-        if dataset_info is not None:
-            checkpoint['dataset_info'] = dataset_info
-        
-        # Create filename
-        if is_best:
-            filename = f'best_model_{self.dataset_type}_epoch_{epoch}.pth'
-        else:
-            filename = f'checkpoint_{self.dataset_type}_epoch_{epoch}.pth'
-        
-        filepath = os.path.join(self.save_dir, filename)
-        
-        # Save checkpoint
-        try:
-            torch.save(checkpoint, filepath)
-            #print(f"{'✓ Best model' if is_best else '📁 Checkpoint'} saved: {filename}")
             
-            # Also save a 'latest' checkpoint for easy resuming
-            if not is_best:
-                latest_path = os.path.join(self.save_dir, f'latest_{self.dataset_type}.pth')
-                torch.save(checkpoint, latest_path)
-            
-        except Exception as e:
-            print(f" Error saving checkpoint: {e}")
-    
     def load_checkpoint(self, filepath, model, optimizer=None):
         """
         Load model checkpoint from disk.
@@ -388,17 +332,6 @@ class CModelTrainer:
                 best_optimizer_state = optimizer.state_dict().copy()
                 if latent_vectors is not None:
                     best_latent_state = latent_vectors.detach().clone()
-                # Save best model checkpoint
-                self.save_checkpoint(
-                    model, optimizer, epoch+1, train_loss, None, # val_loss not available in train()
-                    is_best=True, latent_vectors=latent_vectors, dataset_info=dataset_info
-                )
-            # Save regular checkpoint at specified frequency
-            if not is_best and ((epoch+1) % self.save_frequency == 0 or (epoch+1) == self.epochs):
-                self.save_checkpoint(
-                    model, optimizer, epoch+1, train_loss, None,
-                    is_best=False, latent_vectors=latent_vectors, dataset_info=dataset_info
-                )
             epoch_data = {
                 'epoch': epoch + 1,
                 'train_loss': train_loss,
@@ -409,30 +342,41 @@ class CModelTrainer:
             history.append(epoch_data)
         return history, best_model_state, best_optimizer_state, best_latent_state, best_epoch
 
-    def validate(self, model, val_dataset, latent_dim, device, num_steps=500, lr=1e-2):
+    def validate(self, model, val_loader, latent_dim, device, epoch=None):
         """
         Validation phase: optimize latent vectors for each validation shape using trained decoder.
         Returns: (validation_history, optimized_latents)
         """
-        print("Optimizing latent vectors for validation set...")
+        print("Optimizing latent vectors for validation set...\n")
+        
         model.eval()
         optimized_latents = []
         validation_history = []
-        for idx in range(len(val_dataset)):
-            # For SDFDataset, get points and sdf values
-            if hasattr(val_dataset, 'files'):
-                file_info = val_dataset.files[idx]
-                coords = torch.tensor(np.load(file_info['points_file']), dtype=torch.float32).to(device)
-                sdf_samples = torch.tensor(np.load(file_info['distances_file']), dtype=torch.float32).to(device)
+
+        # Get learning rates from config
+        lr_net = self.config.get('network_learning_rate', 1e-3)
+        lr_latent = self.config.get('latent_learning_rate', 1e-2)
+
+        for idx, batch in enumerate(val_loader):
+            # For SDFDataset: (coords, latents, targets)
+            if len(batch) == 3:
+                coords, _, sdf_samples = batch
+                coords = coords.squeeze(0).to(device) if coords.dim() == 3 and coords.shape[0] == 1 else coords.to(device)
+                sdf_samples = sdf_samples.squeeze(0).to(device) if sdf_samples.dim() == 3 and sdf_samples.shape[0] == 1 else sdf_samples.to(device)
             else:
-                # For ShapeDataset
-                points, sdf_samples = val_dataset[idx]
-                coords = points.to(device)
+                # For ShapeDataset: (points, sdf_samples)
+                coords, sdf_samples = batch
+                coords = coords.to(device)
                 sdf_samples = sdf_samples.to(device)
             # Optimize latent
             latent = torch.randn(1, latent_dim, requires_grad=True, device=device)
-            optimizer = torch.optim.Adam([latent], lr=lr)
-            for step in tqdm(range(num_steps), desc=f"Shape {idx+1}/{len(val_dataset)}", unit="step"):
+            # Use separate learning rates for model and latent
+            optimizer = torch.optim.Adam([
+                {"params": model.parameters(), "lr": lr_net},
+                {"params": [latent], "lr": lr_latent}
+            ])
+
+            for step in tqdm(range(self.epochs), desc=f"Shape {idx+1}/{len(val_loader)}", unit="step"):
                 optimizer.zero_grad()
                 # Reshape coords if needed
                 if coords.dim() == 1:
@@ -444,16 +388,24 @@ class CModelTrainer:
                 loss = torch.nn.functional.mse_loss(sdf_pred, sdf_in)
                 loss.backward()
                 optimizer.step()
+
             optimized_latents.append(latent.detach().cpu())
             # Compute validation loss for this shape
             with torch.no_grad():
                 sdf_pred = model(latent, coords_in)
                 val_loss = torch.nn.functional.mse_loss(sdf_pred, sdf_in).item()
-            validation_history.append({
+            entry = {
                 'shape_idx': idx,
                 'val_loss': val_loss,
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            })
+            }
+            # Always record the epoch if available
+            if hasattr(self, 'current_epoch'):
+                entry['epoch'] = self.current_epoch
+            elif epoch is not None:
+                entry['epoch'] = epoch
+            validation_history.append(entry)
+            
         return validation_history, optimized_latents
 
     def load_best_model(self, run_directory, model, optimizer=None):
@@ -627,26 +579,26 @@ class CModelTrainer:
         """Create loss curve visualization for both training and validation."""
         if not training_history or not validation_history:
             return None
-        
+
         try:
             epochs = [h['epoch'] for h in training_history]
             train_losses = [h['train_loss'] for h in training_history]
-            
+
             plt.figure(figsize=(10, 6))
             plt.plot(epochs, train_losses, 'o-', label='Training Loss', alpha=0.8)
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
-            plt.title(f'Training Loss - {self.dataset_type.upper()} Dataset')
+            plt.title(f'Train vs. Validation Loss - {self.dataset_type.upper()} Dataset')
             plt.legend()
             plt.grid(True, alpha=0.3)
-            
+
             # Save to base64
             buffer = BytesIO()
             plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
             plt.close()
-            
+
             return base64.b64encode(buffer.getvalue()).decode('utf-8')
-        
+
         except Exception as e:
             print(f"Warning: Could not create loss plot: {e}")
             return None
@@ -710,7 +662,7 @@ class CModelTrainer:
         import json
         with open(config_path, 'w') as f:
             json.dump(initial_config, f, indent=2)
-        print(f"Training run directory: {run_dir}")
+        print(f"Training run directory: {run_dir}\n")
 
         total_start_time = time.time()
         training_history, best_model_state, best_optimizer_state, best_latent_state, best_epoch = self.train(
@@ -730,9 +682,32 @@ class CModelTrainer:
                 latent_vectors.data = best_latent_state.to(latent_vectors.device)
                 print(f"✓ Latent vectors restored")
             print(f"✓ Best model restored from epoch {best_epoch}")
+            # Always overwrite best_model.pth in models/
+            best_model_path = os.path.join(model_dir, 'best_model.pth')
+            torch.save({
+                'epoch': best_epoch,
+                'model_state_dict': best_model_state,
+                'optimizer_state_dict': best_optimizer_state,
+                'latent_vectors': best_latent_state.detach().cpu() if best_latent_state is not None else None,
+                'config': self.config,
+                'dataset_type': self.dataset_type,
+                'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
+            }, best_model_path)
+
+        # Always save latest checkpoint to checkpoints/ (after training loop, not per-epoch)
+        latest_checkpoint_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pth')
+        torch.save({
+            'epoch': best_epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'latent_vectors': latent_vectors.detach().cpu() if latent_vectors is not None else None,
+            'config': self.config,
+            'dataset_type': self.dataset_type,
+            'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
+        }, latest_checkpoint_path)
 
         validation_history, val_latents = self.validate(
-            model, val_dataset, latent_vectors.shape[1] if latent_vectors is not None else 256, self.device, num_steps=500, lr=1e-2
+            model, val_loader, latent_vectors.shape[1] if latent_vectors is not None else 256, self.device
         )
 
         best_val_loss = min([h['val_loss'] for h in validation_history]) if validation_history and 'val_loss' in validation_history[0] else None
@@ -759,6 +734,7 @@ class CModelTrainer:
         final_path = os.path.join(model_dir, 'final_model_complete.pth')
         torch.save(final_model_data, final_path)
 
+        # Save training summary to metrics/
         training_summary = {
             'experiment_id': self.experiment_id,
             'total_training_time': total_training_time,
@@ -773,7 +749,7 @@ class CModelTrainer:
             'saved_artifacts': {
                 'best_model': os.path.join(model_dir, 'best_model.pth'),
                 'final_complete': final_path,
-                'latest_checkpoint': os.path.join(checkpoint_dir, 'latest_checkpoint.pth'),
+                'latest_checkpoint': latest_checkpoint_path,
                 'training_config': config_path,
             },
             'status': 'completed',
@@ -793,7 +769,7 @@ class CModelTrainer:
         report['training_artifacts'] = {
             'best_model_path': os.path.join(model_dir, 'best_model.pth'),
             'final_model_path': os.path.join(model_dir, 'final_model_complete.pth'),
-            'latest_checkpoint_path': os.path.join(checkpoint_dir, 'latest_checkpoint.pth'),
+            'latest_checkpoint_path': latest_checkpoint_path,
             'training_summary_path': summary_path,
             'run_directory': run_dir
         }
