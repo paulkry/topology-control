@@ -7,6 +7,7 @@ import trimesh
 import torch
 import os
 from tqdm import tqdm
+from typing import List
 
 from sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
 from config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM

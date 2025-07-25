@@ -7,10 +7,14 @@ from scipy.interpolate import griddata
 import os
 import pyvista as pv
 
-from compute_volume import get_volume_coords, generate_mesh_from_latent, predict_sdf
+from compute_volume_genus import get_volume_coords, generate_mesh_from_latent, predict_sdf, generate_mesh_from_sdf, compute_volume, compute_genus
 from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
-from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX
+from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
 import polyscope.imgui as psim
+
+def saturate_color(color, saturation=0.5):
+    gray = np.mean(color)
+    return tuple(gray + saturation * (c - gray) for c in color)
 
 def create_interpolation_function(data_array):
     # converts array into continuous function between 0 and 1
@@ -23,25 +27,21 @@ def create_interpolation_function(data_array):
 
 def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST): 
     """
-    Extract the SDF values and visualize as an isosurface using Polyscope volume grid.
+    Extract the SDF values and visualize as an isosurface using explicit mesh representation.
     """
     coords, grid_size = get_volume_coords()
     
     sdf_values = predict_sdf(latent, coords, sdf, type)
-    sdf_numpy = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
     
-    bound_low = coords.min(dim=0)[0].cpu().numpy()
-    bound_high = coords.max(dim=0)[0].cpu().numpy()
+    # Extract mesh from SDF using marching cubes
+    V, F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
     
     ps.init()
     ps.set_up_dir("z_up")
     
-    ps_grid = ps.register_volume_grid("sdf_grid", grid_size, bound_low, bound_high)
-    
-    ps_grid.add_scalar_quantity("sdf_values", sdf_numpy, defineenable_isosurface_viz=True, 
-                               isosurface_level=0.0,  # Zero level set for SDF
-                               isosurface_color=(0.2, 0.8, 0.2),
-                               enable_gridcube_viz=False)  # Hide grid cubes
+    # Register mesh directly instead of using volume grid
+    ps_mesh = ps.register_surface_mesh("sdf_isosurface", V, F)
+    ps_mesh.set_color((0.2, 0.8, 0.2))
     
     ps.show()
 
@@ -53,12 +53,15 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
     
     coords, grid_size = get_volume_coords()
     path_function = create_interpolation_function(path.cpu().numpy())
+    MAX_VOLUME = (coords.max() - coords.min()).item() ** 3
     
-    bound_low = coords.min(dim=0)[0].cpu().numpy()
-    bound_high = coords.max(dim=0)[0].cpu().numpy()
+    # Current mesh vertices and faces for visualization
+    current_V = None
+    current_F = None
+    ps_mesh = None
     
     def myCallback():
-        nonlocal curr_frame, latent, pred_volume, volume
+        nonlocal curr_frame, latent, pred_volume, volume, current_V, current_F, ps_mesh
 
         psim.TextUnformatted(f"Predicted volume: {pred_volume:.4f}")
         psim.TextUnformatted(f"Actual volume: {volume:.2f}")
@@ -79,21 +82,14 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
             pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
 
             sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
-            V, F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
-            volume = compute_volume(V, F)
-
-            sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
+            current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
+            volume = compute_volume(current_V, current_F)
             
-            ps_grid.add_scalar_quantity(
-                "sdf_values",
-                sdf_values, 
-                defined_on='nodes',
-                enable_isosurface_viz=True, 
-                isosurface_level=0.0,
-                isosurface_color=(0.2, 0.8, 0.2),
-                enable_gridcube_viz=False,
-                enabled=True
-            )
+            if ps_mesh is not None:
+                ps.remove_surface_mesh("interpolation_mesh")
+                
+            ps_mesh = ps.register_surface_mesh("interpolation_mesh", current_V, current_F)
+            ps_mesh.set_color(saturate_color((0.3, 1, 0.3), volume_fraction))
         
     ps.init()
     ps.set_up_dir("y_up")
@@ -101,33 +97,18 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
     ps.set_automatically_compute_scene_extents(False)
     ps.set_length_scale(1)
     
-    ps_grid = ps.register_volume_grid(
-        "interpolation_grid",
-        (grid_size, grid_size, grid_size),
-        bound_low,
-        bound_high
-    )
-
+    # Initial visualization
     latent = path_function(0)
     pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
 
     sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
-    V, F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
-    volume = compute_volume(V, F)
-
-    sdf_values = sdf_values.cpu().numpy().reshape((grid_size, grid_size, grid_size))
-
-
-    ps_grid.add_scalar_quantity(
-        "sdf_values",
-        sdf_values,
-        defined_on='nodes',
-        enable_isosurface_viz=True, 
-        isosurface_level=0.0,
-        isosurface_color=(0.2, 0.8, 0.2),
-        enable_gridcube_viz=False,
-        enabled=True
-    )
+    current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
+    volume = compute_volume(current_V, current_F).item()
+    volume_fraction = volume / MAX_VOLUME
+    
+    # Register initial mesh
+    ps_mesh = ps.register_surface_mesh("interpolation_mesh", current_V, current_F)
+    ps_mesh.set_color(saturate_color((0.3, 1, 0.3), volume_fraction))
     
     ps.set_user_callback(myCallback)
     ps.show()
@@ -257,10 +238,8 @@ if __name__ == "__main__":
 
     # from compute_path import compute_path
     from compute_path_opt import compute_path
-    from compute_volume import generate_mesh_from_sdf, compute_volume
-    # # from compute_path_with_geodesic import compute_geodesic_path
+     # from compute_path_with_geodesic import compute_geodesic_path
     from model import Latent2Volume, Latent2Genera
-    from config import LATENT_DIM, DEV
 
     checkpoint = torch.load("checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)
     volume_regressor = Latent2Volume(LATENT_DIM).to(DEV)
