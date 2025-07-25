@@ -1,0 +1,10 @@
+Artifact: model_architecture
+Generated: 2025-07-25 21:36:06
+Experiment: 20250725_213606
+==================================================
+
+{
+  "model_class": "DeepSDF",
+  "total_parameters": 395261,
+  "trainable_parameters": 395261
+}

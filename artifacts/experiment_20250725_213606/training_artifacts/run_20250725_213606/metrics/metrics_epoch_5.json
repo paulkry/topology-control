@@ -1,0 +1,48 @@
+{
+  "current_epoch": 5,
+  "training_history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.8300213813781738,
+      "val_loss": 0.7983392477035522,
+      "epoch_time": 0.27380990982055664,
+      "is_best": true,
+      "timestamp": "2025-07-25 21:36:07"
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.7600136995315552,
+      "val_loss": 0.8761580586433411,
+      "epoch_time": 0.0490574836730957,
+      "is_best": false,
+      "timestamp": "2025-07-25 21:36:07"
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.8003884553909302,
+      "val_loss": 0.9179481863975525,
+      "epoch_time": 0.04977154731750488,
+      "is_best": false,
+      "timestamp": "2025-07-25 21:36:07"
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.8094021081924438,
+      "val_loss": 0.8812168836593628,
+      "epoch_time": 0.049104928970336914,
+      "is_best": false,
+      "timestamp": "2025-07-25 21:36:07"
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.7614538073539734,
+      "val_loss": 0.8750237822532654,
+      "epoch_time": 0.04709911346435547,
+      "is_best": false,
+      "timestamp": "2025-07-25 21:36:07"
+    }
+  ],
+  "best_epoch": 1,
+  "best_val_loss": 0.7983392477035522,
+  "experiment_id": "20250725_213606"
+}

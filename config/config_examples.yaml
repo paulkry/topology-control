@@ -28,8 +28,8 @@ model_config:
   skip_building: false
   model_name: deepsdf #lipschitz_deepsdf #deepsdf
   # DeepSDF specific parameters matching your notebook
-  z_dim: 2 #16  # Z_DIM = 16 from your notebook
-  layer_size: 128  # HIDDEN_DIM = 64 from your notebook
+  z_dim: 1 #16  # Z_DIM = 16 from your notebook
+  layer_size: 256  # HIDDEN_DIM = 64 from your notebook
   coord_dim: 3  # 3D coordinates
   dropout_p: 0.2  # Match your notebook's dropout_p = 0.2
   
@@ -40,10 +40,10 @@ trainer_config:
   lipschitz_lambda: 0.00001
   loss_function: deepsdf  # Use custom DeepSDF loss
   optimizer: adam
-  network_learning_rate: 0.01  # lr=1e-3 from your notebook
-  latent_learning_rate: 0.01
+  network_learning_rate: 0.001  # lr=1e-3 from your notebook
+  latent_learning_rate: 0 #0.01
   batch_size: 8  # BATCH_SIZE = 16 from your notebook
-  num_epochs: 1000  # max_epochs=20 from your notebook
+  num_epochs: 10000  # max_epochs=20 from your notebook
   max_points: 300000  # Allow more points for better SDF learning
   
   # DeepSDF specific training parameters
@@ -67,6 +67,6 @@ trainer_config:
 evaluator_config:
   skip_evaluation: true
   # Evaluation specific configs for mesh extraction
-  batch_size: 1 #8
+  batch_size: 8
   resolution: 50  # Match training resolution for mesh extraction
   test_data_path: *processed_data_path

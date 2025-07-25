@@ -87,9 +87,13 @@ class PointCloudProcessor:
             - sampled_points: Array of sampled points
         """
         # Sample random points in the -1 to 1 cube
+        # def loguniform(low=-1, high=1, size=None):
+        #     return np.exp(np.random.uniform(low, high, size))
+        # 
         random_points = np.random.uniform(-1, 1, (n_uniform, 3))
         # Compute surface points using blue noise
         print('compute blue noise')
+        # 40% 
         surface_points = igl.blue_noise(vertices, faces, radius)[2]
         # Concatenate surface points with random points
         print('concat')
@@ -99,7 +103,8 @@ class PointCloudProcessor:
         if n_gaussian > 0 and sigma > 0:
             noise = np.random.normal(mu, sigma, (n_gaussian, surface_points.shape[0], 3))
             print("entering tqdm")
-            for i in tqdm(range(n_gaussian)):
+            
+            for i in range(n_gaussian):
                 new_points = surface_points + noise[i]
                 sampled_points = np.concatenate((sampled_points, new_points), axis=0)
         

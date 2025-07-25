@@ -1,0 +1,113 @@
+{
+  "training_config": {
+    "skip_training": false,
+    "processed_data_path": "data/processed",
+    "dataset_type": "sdf",
+    "lipschitz_lambda": 1e-05,
+    "loss_function": "deepsdf",
+    "optimizer": "adam",
+    "network_learning_rate": 0.001,
+    "latent_learning_rate": 0,
+    "batch_size": 8,
+    "num_epochs": 10000,
+    "max_points": 300000,
+    "sdf_delta": 1.0,
+    "latent_sd": 0.01,
+    "latent_mean": 0.0,
+    "dataset_info": {
+      "processed_data_path": "data/processed",
+      "volume_coords_path": null,
+      "train_files": [],
+      "val_files": [],
+      "latent_vectors": null
+    },
+    "save_model": true,
+    "save_best_only": true,
+    "save_frequency": 20,
+    "experiment_id": "20250725_213606",
+    "artifacts_base": "/homes/dnogina/code/topology-control/artifacts"
+  },
+  "model_config": {
+    "model_type": "DeepSDF",
+    "parameters": 395261,
+    "device": "cuda"
+  },
+  "dataset_info": {
+    "train_files": [
+      {
+        "mesh_name": "torus",
+        "points_file": "/homes/dnogina/code/topology-control/data/processed/train/torus_sampled_points.npy",
+        "distances_file": "/homes/dnogina/code/topology-control/data/processed/train/torus_signed_distances.npy",
+        "split": "train"
+      }
+    ],
+    "val_files": [
+      {
+        "mesh_name": "cup",
+        "points_file": "/homes/dnogina/code/topology-control/data/processed/val/cup_sampled_points.npy",
+        "distances_file": "/homes/dnogina/code/topology-control/data/processed/val/cup_signed_distances.npy",
+        "split": "val"
+      }
+    ],
+    "volume_coords": null,
+    "dataset_params": {
+      "z_dim": 1,
+      "latent_mean": 0.0,
+      "latent_sd": 0.01,
+      "num_samples": 50050,
+      "volume_coords_resolution": 50,
+      "point_cloud_params": {
+        "radius": 0.02,
+        "sigma": 0.02,
+        "mu": 0.0,
+        "n_gaussian": 5,
+        "n_uniform": 50000
+      }
+    },
+    "processing_results": {
+      "processed_files": [
+        "torus",
+        "cup"
+      ],
+      "train_files": [
+        "torus"
+      ],
+      "val_files": [
+        "cup"
+      ],
+      "corrupted_files": [],
+      "skipped_files": [],
+      "processing_errors": {},
+      "point_cloud_files": {
+        "train": [
+          "/homes/dnogina/code/topology-control/data/processed/train/torus_sampled_points.npy"
+        ],
+        "val": [
+          "/homes/dnogina/code/topology-control/data/processed/val/cup_sampled_points.npy"
+        ]
+      },
+      "signed_distance_files": {
+        "train": [
+          "/homes/dnogina/code/topology-control/data/processed/train/torus_signed_distances.npy"
+        ],
+        "val": [
+          "/homes/dnogina/code/topology-control/data/processed/val/cup_signed_distances.npy"
+        ]
+      },
+      "total_points_generated": 300220,
+      "train_count": 1,
+      "val_count": 1,
+      "split_ratio": 0.99,
+      "processing_params": {
+        "radius": 0.02,
+        "sigma": 0.02,
+        "mu": 0.0,
+        "n_gaussian": 5,
+        "n_uniform": 50000
+      },
+      "success_rate": 1.0
+    }
+  },
+  "experiment_id": "20250725_213606",
+  "timestamp": "2025-07-25 21:36:06"
+}

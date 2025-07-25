@@ -48,7 +48,8 @@ class SDFDataset(Dataset):
         # self.latent_vectors = torch.randn(len(self.files), z_dim, device='cuda')
         # self.latent_vectors = (self.latent_vectors * latent_sd) + latent_mean
         # self.latent_vectors = F.normalize(self.latent_vectors, dim=1)  # Unit norm
-        self.latent_vectors = torch.tensor([[-.5, .5,], [.5, -.5], [.5, .5], [-.5, -.5]], device='cuda')
+        # self.latent_vectors = torch.tensor([[-.5, .5,], [.5, -.5], [.5, .5], [-.5, -.5]], device='cuda')
+        self.latent_vectors = torch.tensor([[0.,], [1.,],], device='cuda')
         self.latent_vectors.requires_grad = True
         
         # Store volume coordinates for additional sampling if needed

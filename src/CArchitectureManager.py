@@ -298,6 +298,7 @@ class DeepSDF(torch.nn.Module):
         
         # Concatenate latent vector and coordinates
         # [batch_size, z_dim + 3]
+        coords = coords * 100
         x = torch.cat([latent_expanded, coords], dim=-1)
         
         # Store for skip connection

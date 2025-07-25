@@ -52,8 +52,9 @@ for mesh_file in meshes:
 		N = 10
 		noise = np.random.normal(mu, sigma, (N, surface_points.shape[0], 3))
 
-		# add the noise to each of thes sampled points		
-		for i in range(N):
+		# add the noise to each of thes sampled points	
+		from tqdm import tqdm	
+		for i in tqdm(range(N)):
 			new_points = surface_points + noise[i]
 			# concatenate these to the sampled points
 			sampled_points = np.concatenate((sampled_points, new_points), axis=0)
