@@ -12,9 +12,13 @@ from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
 from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
 import polyscope.imgui as psim
 
-def saturate_color(color, saturation=0.5):
-    gray = np.mean(color)
-    return tuple(gray + saturation * (c - gray) for c in color)
+def set_color(alpha, tolerance=0.1):
+    # low tolerance means shape will go to red more quickly
+    
+    error = abs(1-alpha)**tolerance
+    print(error)
+    ret = np.array((error, 1-error, 0))
+    return np.clip(ret, 0, 1)
 
 def create_interpolation_function(data_array):
     # converts array into continuous function between 0 and 1
@@ -53,7 +57,6 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
     
     coords, grid_size = get_volume_coords()
     path_function = create_interpolation_function(path.cpu().numpy())
-    MAX_VOLUME = (coords.max() - coords.min()).item() ** 3
     
     # Current mesh vertices and faces for visualization
     current_V = None
@@ -84,12 +87,13 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
             sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
             current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
             volume = compute_volume(current_V, current_F)
+            volume_fraction = volume / AVG_VOLUME
             
             if ps_mesh is not None:
                 ps.remove_surface_mesh("interpolation_mesh")
                 
             ps_mesh = ps.register_surface_mesh("interpolation_mesh", current_V, current_F)
-            ps_mesh.set_color(saturate_color((0.3, 1, 0.3), volume_fraction))
+            ps_mesh.set_color(set_color(volume_fraction))
         
     ps.init()
     ps.set_up_dir("y_up")
@@ -104,11 +108,12 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, type=COORDS_FI
     sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
     current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
     volume = compute_volume(current_V, current_F).item()
-    volume_fraction = volume / MAX_VOLUME
+    AVG_VOLUME = volume
+    volume_fraction = volume / AVG_VOLUME
     
     # Register initial mesh
     ps_mesh = ps.register_surface_mesh("interpolation_mesh", current_V, current_F)
-    ps_mesh.set_color(saturate_color((0.3, 1, 0.3), volume_fraction))
+    ps_mesh.set_color(set_color(volume_fraction))
     
     ps.set_user_callback(myCallback)
     ps.show()
@@ -237,7 +242,7 @@ if __name__ == "__main__":
     # visualize_sdf(sdf_interpolator, latent=torch.tensor([0.29890096, 0.16535072]))
 
     # from compute_path import compute_path
-    from compute_path_opt import compute_path
+    from compute_path import compute_path
      # from compute_path_with_geodesic import compute_geodesic_path
     from model import Latent2Volume, Latent2Genera
 
@@ -254,7 +259,7 @@ if __name__ == "__main__":
         torch.tensor([3, 1.8], dtype=torch.float32).to(DEV),
         volume_regressor,
         20,
-        smooth_term_w=0.001
+        # smooth_term_w=0.001
     ).cpu()
 
 
