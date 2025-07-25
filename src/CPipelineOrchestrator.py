@@ -232,7 +232,7 @@ class CPipelineOrchestrator:
         dataset_info = processing_report.get('dataset_info')
         
         # Train the model (CModelTrainer will save detailed artifacts automatically)
-        training_results = self.model_trainer.train_and_validate(model, dataset_info)
+        training_results = self.model_trainer.run_training(model, dataset_info)
         
         # Handle different return formats from trainer
         if isinstance(training_results, tuple) and len(training_results) == 2:
@@ -263,7 +263,7 @@ class CPipelineOrchestrator:
         self.artifact_manager.save_artifacts(
             training_results=training_report
         )
-        
+    
         # Log detailed artifact locations
         if 'training_artifacts' in training_report:
             artifacts = training_report['training_artifacts']

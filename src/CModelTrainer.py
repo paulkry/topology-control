@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 import base64
 from io import BytesIO
 import numpy as np
@@ -316,7 +317,7 @@ class CModelTrainer:
         # Save checkpoint
         try:
             torch.save(checkpoint, filepath)
-            print(f"{'✓ Best model' if is_best else '📁 Checkpoint'} saved: {filename}")
+            #print(f"{'✓ Best model' if is_best else '📁 Checkpoint'} saved: {filename}")
             
             # Also save a 'latest' checkpoint for easy resuming
             if not is_best:
@@ -359,293 +360,101 @@ class CModelTrainer:
             print(f"Error loading checkpoint: {e}")
             return None
     
-    def train_and_validate(self, model, dataset_info=None):
+    def train(self, model, train_loader, criterion, optimizer, latent_vectors=None, dataset_info=None):
         """
-        Main training loop with validation and model saving.
-        
-        Args:
-            model: PyTorch model to train
-            dataset_info: Optional dataset info from CDataProcessor (for SDF datasets)
-            
-        Returns:
-            tuple: (trained_model, training_report)
+        Training loop for DeepSDF. Only optimizes network and training latents.
+        Now also saves checkpoints and best model during training.
+        Returns: history, best_model_state, best_optimizer_state, best_latent_state, best_epoch
         """
-        print(f"Starting training on {self.device}")
-        
-        # Move model to device
-        model = model.to(self.device)
-        
-        # Create datasets and data loaders
-        try:
-            train_dataset, val_dataset = self.create_datasets(dataset_info)
-            train_loader, val_loader = self.create_data_loaders(train_dataset, val_dataset)
-        except Exception as e:
-            print(f"Error loading datasets: {e}")
-            return model, {"error": f"Dataset loading failed: {e}"}
-        
-        # Setup loss function and optimizer
-        if self.dataset_type == 'sdf':
-            criterion = self._get_sdf_loss()
-            
-            # Get latent vectors from dataset for SDF training
-            if hasattr(train_dataset, 'latent_vectors'):
-                latent_vectors = train_dataset.latent_vectors.to(self.device)
-                optimizer = self._get_optimizer(model, latent_vectors)
-                print(f"✓ SDF training setup complete with dual learning rates")
-            else:
-                print("⚠️  No latent vectors found in SDF dataset, using single learning rate")
-                optimizer = self._get_optimizer(model)
-                latent_vectors = None
-        else:
-            criterion = nn.MSELoss() if self.loss_function.lower() == 'mse' else nn.L1Loss()
-            optimizer = self._get_optimizer(model)
-            latent_vectors = None
-        
-        # Training state tracking
         history = []
-        best_val_loss = float('inf')
+        best_train_loss = float('inf')
         best_model_state = None
         best_optimizer_state = None
         best_latent_state = None
         best_epoch = 0
         
-        # Create training run directory structure
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
-        run_dir = os.path.join(self.save_dir, f'run_{timestamp}')
-        
-        # Create organized subdirectories
-        checkpoint_dir = os.path.join(run_dir, 'checkpoints')
-        model_dir = os.path.join(run_dir, 'models')
-        config_dir = os.path.join(run_dir, 'configs')
-        metrics_dir = os.path.join(run_dir, 'metrics')
-        
-        for directory in [run_dir, checkpoint_dir, model_dir, config_dir, metrics_dir]:
-            os.makedirs(directory, exist_ok=True)
-        
-        # Save initial configuration
-        config_path = os.path.join(config_dir, 'training_config.json')
-        initial_config = {
-            'training_config': self.config,
-            'model_config': {
-                'model_type': model.__class__.__name__,
-                'parameters': sum(p.numel() for p in model.parameters()),
-                'device': str(self.device)
-            },
-            'dataset_info': dataset_info,
-            'experiment_id': self.experiment_id,
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        import json
-        with open(config_path, 'w') as f:
-            json.dump(initial_config, f, indent=2)
-        
-        print(f"Training run directory: {run_dir}")
-        
-        # Training loop
-        total_start_time = time.time()
-        
-        for epoch in range(self.epochs):
+        for epoch in tqdm(range(self.epochs), desc="Epochs", unit="epoch"):
             start_time = time.time()
-            
-            # Training phase
             train_loss = self._run_epoch(
                 train_loader, model, criterion, optimizer, 
                 is_training=True, epoch=epoch+1
             )
-            
-            # Validation phase
-            val_loss = self._run_epoch(
-                val_loader, model, criterion, optimizer, 
-                is_training=False, epoch=epoch+1
-            )
-            
             epoch_time = time.time() - start_time
-            
-            # Track best model
-            is_best = val_loss < best_val_loss
+            is_best = train_loss < best_train_loss
             if is_best:
-                best_val_loss = val_loss
+                best_train_loss = train_loss
                 best_epoch = epoch + 1
                 best_model_state = model.state_dict().copy()
                 best_optimizer_state = optimizer.state_dict().copy()
-                
                 if latent_vectors is not None:
                     best_latent_state = latent_vectors.detach().clone()
-            
-            # Record history
+                # Save best model checkpoint
+                self.save_checkpoint(
+                    model, optimizer, epoch+1, train_loss, None, # val_loss not available in train()
+                    is_best=True, latent_vectors=latent_vectors, dataset_info=dataset_info
+                )
+            # Save regular checkpoint at specified frequency
+            if not is_best and ((epoch+1) % self.save_frequency == 0 or (epoch+1) == self.epochs):
+                self.save_checkpoint(
+                    model, optimizer, epoch+1, train_loss, None,
+                    is_best=False, latent_vectors=latent_vectors, dataset_info=dataset_info
+                )
             epoch_data = {
                 'epoch': epoch + 1,
                 'train_loss': train_loss,
-                'val_loss': val_loss,
-                'epoch_time': epoch_time,
                 'is_best': is_best,
+                'epoch_time': epoch_time,
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
             }
             history.append(epoch_data)
-            
-            # Print progress
-            print(f"Epoch {epoch+1}/{self.epochs} - "
-                  f"Train Loss: {train_loss:.6f}, "
-                  f"Val Loss: {val_loss:.6f}, "
-                  f"Time: {epoch_time:.2f}s"
-                  f"{' (Best Model)' if is_best else ''}")
-            
-            # Save checkpoints and models
-            try:
-                # Always save latest checkpoint
-                latest_checkpoint = {
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'train_loss': train_loss,
-                    'val_loss': val_loss,
-                    'best_val_loss': best_val_loss,
-                    'best_epoch': best_epoch,
-                    'training_history': history,
-                    'experiment_id': self.experiment_id,
-                    'config': self.config,
-                    'dataset_type': self.dataset_type,
-                    'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
-                }
-                
-                if latent_vectors is not None:
-                    latest_checkpoint['latent_vectors'] = latent_vectors.detach().cpu()
-                if dataset_info is not None:
-                    latest_checkpoint['dataset_info'] = dataset_info
-                
-                latest_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pth')
-                torch.save(latest_checkpoint, latest_path)
-                
-                # Save best model when found
-                if is_best:
-                    best_checkpoint = {
-                        'epoch': epoch + 1,
-                        'model_state_dict': best_model_state,
-                        'optimizer_state_dict': best_optimizer_state,
-                        'train_loss': train_loss,
-                        'val_loss': val_loss,
-                        'best_val_loss': best_val_loss,
-                        'experiment_id': self.experiment_id,
-                        'config': self.config,
-                        'dataset_type': self.dataset_type,
-                        'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
-                    }
-                    
-                    if best_latent_state is not None:
-                        best_checkpoint['latent_vectors'] = best_latent_state.cpu()
-                    if dataset_info is not None:
-                        best_checkpoint['dataset_info'] = dataset_info
-                    
-                    best_path = os.path.join(model_dir, 'best_model.pth')
-                    torch.save(best_checkpoint, best_path)
-                    print(f"✓ Best model saved: best_model.pth (epoch {epoch+1})")
-                
-                # Save periodic metrics
-                if (epoch + 1) % 5 == 0:
-                    metrics_data = {
-                        'current_epoch': epoch + 1,
-                        'training_history': history,
-                        'best_epoch': best_epoch,
-                        'best_val_loss': best_val_loss,
-                        'experiment_id': self.experiment_id
-                    }
-                    metrics_path = os.path.join(metrics_dir, f'metrics_epoch_{epoch+1}.json')
-                    with open(metrics_path, 'w') as f:
-                        json.dump(metrics_data, f, indent=2)
-                
-            except Exception as e:
-                print(f"Warning: Could not save artifacts at epoch {epoch+1}: {e}")
-        
-        total_training_time = time.time() - total_start_time
-        
-        # Restore best model state
-        if best_model_state is not None:
-            print(f"\n Restoring best model state from epoch {best_epoch}...")
-            model.load_state_dict(best_model_state)
-            
-            if best_optimizer_state is not None:
-                optimizer.load_state_dict(best_optimizer_state)
-                print(f"✓ Optimizer state restored")
-            
-            if best_latent_state is not None and latent_vectors is not None:
-                latent_vectors.data = best_latent_state.to(latent_vectors.device)
-                print(f"✓ Latent vectors restored")
-            
-            print(f"✓ Best model restored from epoch {best_epoch}")
-        
-        # Save final comprehensive model
-        final_model_data = {
-            'epoch': best_epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'best_val_loss': best_val_loss,
-            'training_history': history,
-            'config': self.config,
-            'dataset_type': self.dataset_type,
-            'model_parameters': sum(p.numel() for p in model.parameters()),
-            'total_training_time': total_training_time,
-            'experiment_id': self.experiment_id,
-            'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
-        }
-        
-        if latent_vectors is not None:
-            final_model_data['latent_vectors'] = latent_vectors.detach().cpu()
-        if dataset_info is not None:
-            final_model_data['dataset_info'] = dataset_info
-        
-        final_path = os.path.join(model_dir, 'final_model_complete.pth')
-        torch.save(final_model_data, final_path)
-        
-        # Save final training summary
-        training_summary = {
-            'experiment_id': self.experiment_id,
-            'total_training_time': total_training_time,
-            'best_epoch': best_epoch,
-            'best_val_loss': best_val_loss,
-            'final_train_loss': history[-1]['train_loss'] if history else None,
-            'final_val_loss': history[-1]['val_loss'] if history else None,
-            'total_epochs': len(history),
-            'model_parameters': sum(p.numel() for p in model.parameters()),
-            'run_directory': run_dir,
-            'saved_artifacts': {
-                'best_model': os.path.join(model_dir, 'best_model.pth'),
-                'final_complete': os.path.join(model_dir, 'final_model_complete.pth'),
-                'latest_checkpoint': os.path.join(checkpoint_dir, 'latest_checkpoint.pth'),
-                'training_config': os.path.join(config_dir, 'training_config.json'),
-            },
-            'status': 'completed',
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        summary_path = os.path.join(metrics_dir, 'training_summary.json')
-        with open(summary_path, 'w') as f:
-            json.dump(training_summary, f, indent=2)
-        
-        # Create training report for orchestrator
-        report = self._create_report(history, best_val_loss)
-        report['run_directory'] = run_dir
-        report['experiment_id'] = self.experiment_id
-        report['model_saved'] = True
-        report['best_epoch'] = best_epoch
-        report['total_training_time'] = total_training_time
-        
-        # Add paths to artifacts for orchestrator integration
-        report['training_artifacts'] = {
-            'best_model_path': os.path.join(model_dir, 'best_model.pth'),
-            'final_model_path': os.path.join(model_dir, 'final_model_complete.pth'),
-            'latest_checkpoint_path': os.path.join(checkpoint_dir, 'latest_checkpoint.pth'),
-            'training_summary_path': summary_path,
-            'run_directory': run_dir
-        }
-        
-        print(f"\nTraining artifacts saved to: {run_dir}")
-        print(f"   Models: {model_dir}")
-        print(f"   Checkpoints: {checkpoint_dir}")
-        print(f"   Configs: {config_dir}")
-        print(f"   Metrics: {metrics_dir}")
-        
-        return model, report
+        return history, best_model_state, best_optimizer_state, best_latent_state, best_epoch
+
+    def validate(self, model, val_dataset, latent_dim, device, num_steps=500, lr=1e-2):
+        """
+        Validation phase: optimize latent vectors for each validation shape using trained decoder.
+        Returns: (validation_history, optimized_latents)
+        """
+        print("Optimizing latent vectors for validation set...")
+        model.eval()
+        optimized_latents = []
+        validation_history = []
+        for idx in range(len(val_dataset)):
+            # For SDFDataset, get points and sdf values
+            if hasattr(val_dataset, 'files'):
+                file_info = val_dataset.files[idx]
+                coords = torch.tensor(np.load(file_info['points_file']), dtype=torch.float32).to(device)
+                sdf_samples = torch.tensor(np.load(file_info['distances_file']), dtype=torch.float32).to(device)
+            else:
+                # For ShapeDataset
+                points, sdf_samples = val_dataset[idx]
+                coords = points.to(device)
+                sdf_samples = sdf_samples.to(device)
+            # Optimize latent
+            latent = torch.randn(1, latent_dim, requires_grad=True, device=device)
+            optimizer = torch.optim.Adam([latent], lr=lr)
+            for step in tqdm(range(num_steps), desc=f"Shape {idx+1}/{len(val_dataset)}", unit="step"):
+                optimizer.zero_grad()
+                # Reshape coords if needed
+                if coords.dim() == 1:
+                    coords_in = coords.unsqueeze(0)
+                else:
+                    coords_in = coords.unsqueeze(0) if coords.dim() == 2 else coords
+                sdf_in = sdf_samples.unsqueeze(0) if sdf_samples.dim() == 1 else sdf_samples
+                sdf_pred = model(latent, coords_in)
+                loss = torch.nn.functional.mse_loss(sdf_pred, sdf_in)
+                loss.backward()
+                optimizer.step()
+            optimized_latents.append(latent.detach().cpu())
+            # Compute validation loss for this shape
+            with torch.no_grad():
+                sdf_pred = model(latent, coords_in)
+                val_loss = torch.nn.functional.mse_loss(sdf_pred, sdf_in).item()
+            validation_history.append({
+                'shape_idx': idx,
+                'val_loss': val_loss,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        return validation_history, optimized_latents
 
     def load_best_model(self, run_directory, model, optimizer=None):
         """
@@ -757,7 +566,7 @@ class CModelTrainer:
         
         with torch.set_grad_enabled(is_training):
             for batch_idx, batch_data in enumerate(data_loader):
-                # Only handle SDF dataset: (coords, latents, sdfs)
+                # Only handle SDF dataset: (coords, latents, targets)
                 if len(batch_data) == 3:
                     coords, latents, targets = batch_data
                     coords = coords.to(self.device)  # [batch, num_points, 3]
@@ -789,47 +598,45 @@ class CModelTrainer:
         
         return total_loss / num_batches if num_batches > 0 else 0.0
     
-    def _create_report(self, history, best_val_loss):
-        """Create training report with metrics and visualization."""
-        if not history:
+    def _create_report(self, training_history, validation_history, best_train_loss, best_val_loss):
+        """Create training report with metrics and visualization for both training and validation."""
+        if not training_history:
             return {"error": "No training history"}
-        
-        total_time = sum(h['epoch_time'] for h in history)
-        
+        if not validation_history:
+            return {"error": "No validation history"}
+        total_time = sum(h['epoch_time'] for h in training_history)
         report = {
-            "total_epochs": len(history),
+            "total_epochs": len(training_history),
+            "best_train_loss": best_train_loss,
             "best_val_loss": best_val_loss,
-            "final_train_loss": history[-1]['train_loss'],
-            "final_val_loss": history[-1]['val_loss'],
+            "final_train_loss": training_history[-1]['train_loss'],
+            "final_val_loss": validation_history[-1]['val_loss'],
             "total_training_time": total_time,
-            "avg_epoch_time": total_time / len(history),
-            "training_history": history,
+            "avg_epoch_time": total_time / len(training_history),
+            "training_history": training_history,
+            "validation_history": validation_history,
             "dataset_type": self.dataset_type
         }
-        
         # Add loss plot
-        loss_plot = self._create_loss_plot(history)
+        loss_plot = self._create_loss_plot(training_history, validation_history)
         if loss_plot:
             report["loss_plot"] = loss_plot
-        
         return report
     
-    def _create_loss_plot(self, history):
-        """Create loss curve visualization."""
-        if not history:
+    def _create_loss_plot(self, training_history, validation_history):
+        """Create loss curve visualization for both training and validation."""
+        if not training_history or not validation_history:
             return None
         
         try:
-            epochs = [h['epoch'] for h in history]
-            train_losses = [h['train_loss'] for h in history]
-            val_losses = [h['val_loss'] for h in history]
+            epochs = [h['epoch'] for h in training_history]
+            train_losses = [h['train_loss'] for h in training_history]
             
             plt.figure(figsize=(10, 6))
             plt.plot(epochs, train_losses, 'o-', label='Training Loss', alpha=0.8)
-            plt.plot(epochs, val_losses, 's-', label='Validation Loss', alpha=0.8)
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
-            plt.title(f'Training and Validation Loss - {self.dataset_type.upper()} Dataset')
+            plt.title(f'Training Loss - {self.dataset_type.upper()} Dataset')
             plt.legend()
             plt.grid(True, alpha=0.3)
             
@@ -843,3 +650,156 @@ class CModelTrainer:
         except Exception as e:
             print(f"Warning: Could not create loss plot: {e}")
             return None
+    
+    def run_training(self, model, dataset_info=None):
+        """
+        Main training loop with validation and model saving.
+        Args:
+            model: PyTorch model to train
+            dataset_info: Optional dataset info from CDataProcessor (for SDF datasets)
+        Returns:
+            tuple: (trained_model, training_report)
+        """
+        print(f"Starting training on {self.device}")
+        model = model.to(self.device)
+        # Create datasets and data loaders
+        try:
+            train_dataset, val_dataset = self.create_datasets(dataset_info)
+            train_loader, val_loader = self.create_data_loaders(train_dataset, val_dataset)
+        except Exception as e:
+            print(f"Error loading datasets: {e}")
+            return model, {"error": f"Dataset loading failed: {e}"}
+        # Setup loss function and optimizer
+        if self.dataset_type == 'sdf':
+            criterion = self._get_sdf_loss()
+            if hasattr(train_dataset, 'latent_vectors'):
+                latent_vectors = train_dataset.latent_vectors.to(self.device)
+                optimizer = self._get_optimizer(model, latent_vectors)
+                print(f"✓ SDF training setup complete with dual learning rates")
+            else:
+                print("⚠️  No latent vectors found in SDF dataset, using single learning rate")
+                optimizer = self._get_optimizer(model)
+                latent_vectors = None
+        else:
+            criterion = nn.MSELoss() if self.loss_function.lower() == 'mse' else nn.L1Loss()
+            optimizer = self._get_optimizer(model)
+            latent_vectors = None
+            
+        timestamp = time.strftime('%Y%m%d_%H%M%S')
+        run_dir = os.path.join(self.save_dir, f'run_{timestamp}')
+        checkpoint_dir = os.path.join(run_dir, 'checkpoints')
+        model_dir = os.path.join(run_dir, 'models')
+        config_dir = os.path.join(run_dir, 'configs')
+        metrics_dir = os.path.join(run_dir, 'metrics')
+        for directory in [run_dir, checkpoint_dir, model_dir, config_dir, metrics_dir]:
+            os.makedirs(directory, exist_ok=True)
+            
+        # Save initial configuration
+        config_path = os.path.join(config_dir, 'training_config.json')
+        initial_config = {
+            'training_config': self.config,
+            'model_config': {
+                'model_type': model.__class__.__name__,
+                'parameters': sum(p.numel() for p in model.parameters()),
+                'device': str(self.device)
+            },
+            'dataset_info': dataset_info,
+            'experiment_id': self.experiment_id,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        import json
+        with open(config_path, 'w') as f:
+            json.dump(initial_config, f, indent=2)
+        print(f"Training run directory: {run_dir}")
+
+        total_start_time = time.time()
+        training_history, best_model_state, best_optimizer_state, best_latent_state, best_epoch = self.train(
+            model, train_loader, criterion, optimizer, latent_vectors, dataset_info
+        )
+
+        best_train_loss = min([h['train_loss'] for h in training_history]) if training_history else None
+        total_training_time = time.time() - total_start_time
+        
+        if best_model_state is not None:
+            print(f"\n Restoring best model state from epoch {best_epoch}...")
+            model.load_state_dict(best_model_state)
+            if best_optimizer_state is not None:
+                optimizer.load_state_dict(best_optimizer_state)
+                print(f"✓ Optimizer state restored")
+            if best_latent_state is not None and latent_vectors is not None:
+                latent_vectors.data = best_latent_state.to(latent_vectors.device)
+                print(f"✓ Latent vectors restored")
+            print(f"✓ Best model restored from epoch {best_epoch}")
+
+        validation_history, val_latents = self.validate(
+            model, val_dataset, latent_vectors.shape[1] if latent_vectors is not None else 256, self.device, num_steps=500, lr=1e-2
+        )
+
+        best_val_loss = min([h['val_loss'] for h in validation_history]) if validation_history and 'val_loss' in validation_history[0] else None
+
+        final_model_data = {
+            'epoch': best_epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'best_train_loss': best_train_loss,
+            'best_val_loss': best_val_loss,
+            'training_history': training_history,
+            'validation_history': validation_history,
+            'config': self.config,
+            'dataset_type': self.dataset_type,
+            'model_parameters': sum(p.numel() for p in model.parameters()),
+            'total_training_time': total_training_time,
+            'experiment_id': self.experiment_id,
+            'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
+        }
+        if latent_vectors is not None:
+            final_model_data['latent_vectors'] = latent_vectors.detach().cpu()
+        if dataset_info is not None:
+            final_model_data['dataset_info'] = dataset_info
+        final_path = os.path.join(model_dir, 'final_model_complete.pth')
+        torch.save(final_model_data, final_path)
+
+        training_summary = {
+            'experiment_id': self.experiment_id,
+            'total_training_time': total_training_time,
+            'best_epoch': best_epoch,
+            'best_train_loss': best_train_loss,
+            'best_val_loss': best_val_loss,
+            'final_train_loss': training_history[-1]['train_loss'] if training_history else None,
+            'final_val_loss': validation_history[-1]['val_loss'] if validation_history else None,
+            'total_epochs': len(training_history),
+            'model_parameters': sum(p.numel() for p in model.parameters()),
+            'run_directory': run_dir,
+            'saved_artifacts': {
+                'best_model': os.path.join(model_dir, 'best_model.pth'),
+                'final_complete': final_path,
+                'latest_checkpoint': os.path.join(checkpoint_dir, 'latest_checkpoint.pth'),
+                'training_config': config_path,
+            },
+            'status': 'completed',
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        summary_path = os.path.join(metrics_dir, 'training_summary.json')
+        with open(summary_path, 'w') as f:
+            json.dump(training_summary, f, indent=2)
+
+        report = self._create_report(training_history, validation_history, best_train_loss, best_val_loss)
+        report['run_directory'] = run_dir
+        report['experiment_id'] = self.experiment_id
+        report['model_saved'] = True
+        report['best_epoch'] = best_epoch
+        report['total_training_time'] = total_training_time
+        report['optimized_val_latents'] = [v.numpy().tolist() for v in val_latents]
+        report['training_artifacts'] = {
+            'best_model_path': os.path.join(model_dir, 'best_model.pth'),
+            'final_model_path': os.path.join(model_dir, 'final_model_complete.pth'),
+            'latest_checkpoint_path': os.path.join(checkpoint_dir, 'latest_checkpoint.pth'),
+            'training_summary_path': summary_path,
+            'run_directory': run_dir
+        }
+        print(f"\nTraining artifacts saved to: {run_dir}")
+        print(f"   Models: {model_dir}")
+        print(f"   Checkpoints: {checkpoint_dir}")
+        print(f"   Configs: {config_dir}")
+        print(f"   Metrics: {metrics_dir}")
+        return model, report
