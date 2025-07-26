@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 from scipy.interpolate import griddata
 import os
-import pyvista as pv
+# import pyvista as pv
 
 from compute_volume_genus import get_volume_coords, generate_mesh_from_latent, predict_sdf, generate_mesh_from_sdf, compute_volume, compute_genus
 from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
@@ -52,7 +52,7 @@ def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
 
 import polyscope.imgui as psim
 
-def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_regressor, type=COORDS_FIRST):
+def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifier, type=COORDS_FIRST):
     curr_frame = 0
     
     coords, grid_size = get_volume_coords()
@@ -85,7 +85,7 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_regresso
         
         if update_frame:
             pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
-            pred_genus = genus_regressor(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
+            pred_genus = genus_classifier(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
 
             sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
             current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
@@ -115,7 +115,7 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_regresso
     genus = compute_genus(current_V, current_F)
 
     pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
-    pred_genus = genus_regressor(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
+    pred_genus = genus_classifier(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
 
     AVG_VOLUME = volume
     volume_fraction = volume / AVG_VOLUME
@@ -261,9 +261,9 @@ if __name__ == "__main__":
     volume_regressor.eval()
 
     checkpoint = torch.load("checkpoints/latent2genera_best.pt", map_location=DEV)["model_state_dict"]
-    genus_regressor = Latent2Genera(LATENT_DIM).to(DEV)
-    genus_regressor.load_state_dict(checkpoint)
-    genus_regressor.eval()
+    genus_classifier = Latent2Genera(LATENT_DIM, num_classes=6).to(DEV)
+    genus_classifier.load_state_dict(checkpoint)
+    genus_classifier.eval()
 
     # visualize_2d_path(model)
 
@@ -285,4 +285,4 @@ if __name__ == "__main__":
     # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
     # path = torch.tensor(path, dtype=torch.float32)
 
-    visualize_interpolation_path(deepsdf, path, volume_regressor, genus_regressor, LATENT_FIRST)
+    visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifier, LATENT_FIRST)

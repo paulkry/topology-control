@@ -74,12 +74,19 @@ def compute_genus(vertices, faces):
     """
     Compute the genus of the object represented by the latent code.
     """
-    # compute genus using: V - E + F = 2 - 2G
-    V = vertices.shape[0]
-    E = len(set(tuple(sorted(edge)) for face in faces for edge in [(face[i], face[(i+1) % 3]) for i in range(3)]))
-    F = faces.shape[0]
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
-    genus = (2 - (V - E + F)) // 2
+    V = mesh.vertices.shape[0]
+    E = mesh.edges_unique.shape[0]
+    F = mesh.faces.shape[0]
+
+    # Check for connected components (for multi-component genus computation)
+    boundaries = mesh.edges[trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1)]
+    B = len(trimesh.graph.connected_components(boundaries))
+    C = len(mesh.split(only_watertight=False))
+
+    euler_char = V - E + F
+    genus = (2 * C - euler_char - B) // 2
 
     return genus
 
