@@ -9,15 +9,16 @@ processor_config:
     raw: &raw_data_path data/raw 
     processed: &processed_data_path data/processed 
 
-  train_val_split: 0.8
+  train_val_split: .99
 
   # Updated point cloud params to match your notebook
   point_cloud_params:
     radius: 0.02
     sigma: 0.02  # Match your notebook's sigma = radius
     mu: 0.0
-    n_gaussian: 5  # N = 10 from your notebook
+    n_gaussian: 1  # N = 10 from your notebook
     n_uniform: 10000  # NUM_SAMPLES = 10000 from your notebook
+    target_volume: 20 
 
   # Volume processor params for SDF generation
   volume_processor_params:
@@ -28,7 +29,7 @@ model_config:
   skip_building: false
   model_name: deepsdf
   # DeepSDF specific parameters matching your notebook
-  z_dim: 16  # Z_DIM = 16 from your notebook
+  z_dim: 4  # Z_DIM = 16 from your notebook
   layer_size: 64  # HIDDEN_DIM = 64 from your notebook
   coord_dim: 3  # 3D coordinates
   dropout_p: 0.2  # Match your notebook's dropout_p = 0.2
@@ -39,11 +40,11 @@ trainer_config:
   dataset_type: sdf  # Important: specify SDF dataset type
   loss_function: deepsdf  # Use custom DeepSDF loss
   optimizer: adam
-  network_learning_rate: 0.001  # lr=1e-3 from your notebook
-  latent_learning_rate: 0.01
-  batch_size: 8  # BATCH_SIZE = 16 from your notebook
-  num_epochs: 1000  # max_epochs=20 from your notebook
-  max_points: 15000  # Allow more points for better SDF learning
+  network_learning_rate: 0.0001  # lr=1e-3 from your notebook
+  latent_learning_rate: 0.001
+  batch_size: 16  # BATCH_SIZE = 16 from your notebook
+  num_epochs: 10000  # max_epochs=20 from your notebook
+  max_points: 30000  # Allow more points for better SDF learning
   
   # DeepSDF specific training parameters
   sdf_delta: 1.0  # DELTA = 1.0 from your notebook
@@ -61,11 +62,11 @@ trainer_config:
   # Model saving
   save_model: true
   save_best_only: true
-  save_frequency: 5
+  save_frequency: 20
   
 evaluator_config:
   skip_evaluation: false
   # Evaluation specific configs for mesh extraction
-  batch_size: 8
+  batch_size: 16
   resolution: 50  # Match training resolution for mesh extraction
   test_data_path: *processed_data_path

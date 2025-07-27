@@ -147,7 +147,7 @@ class DeepSDF(torch.nn.Module):
         """Initialize network weights using Xavier/Glorot initialization."""
         for module in self.modules():
             if isinstance(module, torch.nn.Linear):
-                torch.nn.init.xavier_uniform_(module.weight)
+                torch.nn.init.xavier_normal_(module.weight)
                 torch.nn.init.zeros_(module.bias)
 
     def create_layer_block(self, input_size, output_size):

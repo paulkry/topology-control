@@ -1,3 +1,4 @@
+from typing import List
 import igl
 import polyscope as ps
 import numpy as np
@@ -7,10 +8,14 @@ import trimesh
 import torch
 import os
 from tqdm import tqdm
+<<<<<<< Updated upstream:volume/compute_volume_genus.py
 from typing import List
+=======
+import gpytoolbox as gpy
+>>>>>>> Stashed changes:volume/compute_volume.py
 
-from sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
-from config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
+from volume.sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
+from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
 
 def generate_mesh_from_sdf(sdf, coords, grid_size):
     vertices, faces, e2v = igl.marching_cubes(
@@ -101,6 +106,15 @@ def compute_volume(vertices, faces):
     volume = abs(mesh.volume)
         
     return volume
+
+def match_volume(vertices, faces, target_volume=10):
+    volume = compute_volume(vertices, faces)
+
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    scale = (target_volume / abs(volume)) ** (1/3)
+    mesh.apply_scale(scale)
+
+    return mesh.vertices, mesh.faces
 
     #start regularization to preserve topology and optimize path in latent space
 def L_topology(latent, coords, model, type=COORDS_FIRST):
@@ -206,10 +220,18 @@ def generate_syn_latent_volume_data(num_samples):
 
 if __name__ == "__main__":
     #----------------------------------------------------------------
-    # Data Generation
-    model_path = "trained_deepsdfs/sdfnet_model.pt"
-    scripted_model = torch.jit.load(model_path).to(DEV)
+    
+    V_torus, F_torus = gpy.read_mesh('/Users/marina.levay/Documents/GitHub/topology-control/data/raw/teapot.obj')
+    V_cup, F_cup = gpy.read_mesh('/Users/marina.levay/Documents/GitHub/topology-control/data/raw/cup.obj')
 
+<<<<<<< Updated upstream:volume/compute_volume_genus.py
     generate_latent_volume_data(2000, scripted_model)
     # generate_syn_latent_volume_data(2000)
     
+=======
+    V_torus_scaled, F_torus_scaled = match_volume(V_torus, F_torus)
+
+    volume_torus = compute_volume(V_torus_scaled, F_torus_scaled)
+
+    print(f"Torus volume: {volume_torus}, scaled to match target volume: 10")
+>>>>>>> Stashed changes:volume/compute_volume.py

@@ -3,6 +3,7 @@ Evaluate the SDF model and extract meshes from learned representations.
 """
 import torch
 import numpy as np
+import polyscope as ps
 import skimage.measure
 from torch.utils.data import DataLoader
 from src.CModelTrainer import SDFDataset
@@ -45,7 +46,8 @@ class CEvaluator:
             test_dataset, 
             batch_size=batch_size, 
             shuffle=False,  # Reproducible evaluation
-            collate_fn=test_dataset.collate_fn
+            collate_fn=test_dataset.collate_fn,
+            num_workers=0
         )
         
         # Get volume coordinates - FIX: Use consistent resolution calculation
@@ -231,7 +233,6 @@ class CEvaluator:
                 return
             
             if not hasattr(self, 'renderer'):
-                import polyscope as ps
                 ps.init()
                 self.renderer = ps
             

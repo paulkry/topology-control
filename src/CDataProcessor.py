@@ -6,6 +6,7 @@ import numpy as np
 import meshio as meshio
 import igl
 from src.CGeometryUtils import PointCloudProcessor, VolumeProcessor
+from volume.compute_volume import compute_volume
   
 class CDataProcessor:
     def __init__(self, config):
@@ -46,10 +47,11 @@ class CDataProcessor:
         # Extract point cloud processing parameters
         pc_params = config.get('point_cloud_params', {})
         self.radius = pc_params.get('radius', 0.02)
-        self.sigma = pc_params.get('sigma', 0.01)
+        self.sigma = pc_params.get('sigma', 0.02)
         self.mu = pc_params.get('mu', 0.0)
         self.n_gaussian = pc_params.get('n_gaussian', 5)
         self.n_uniform = pc_params.get('n_uniform', 1000)
+        self.target_volume = pc_params.get('target_volume', 20)
         
         # Extract the volume processor parameter
         v_params = config.get('volume_processor_params', {})
@@ -60,7 +62,7 @@ class CDataProcessor:
         self.mesh_files = self._discover_mesh_files()
         
         # Initialize point cloud processor
-        self.point_cloud_processor = PointCloudProcessor(data_dir=self.processed_data_path)
+        self.point_cloud_processor = PointCloudProcessor(data_dir=self.processed_data_path, target_volume=self.target_volume)
         
         # Initialize volume processor 
         self.volume_processor = VolumeProcessor(device=self.device, resolution=self.resolution)
@@ -253,6 +255,10 @@ class CDataProcessor:
         try:
             # Load and normalize mesh using PointCloudProcessor method
             vertices, faces, name = self.point_cloud_processor.load_mesh(mesh_path)
+            # Print volume for verification
+            volume = compute_volume(vertices, faces)
+            print(f"  [{split.upper()}] Mesh '{name}' volume after scaling: {volume:.4f}")
+            
         except ValueError as e:
             if "len(points)" in str(e) and "point_data" in str(e):
                 print(f"  [{split.upper()}] [CORRUPTED] Skipping corrupted mesh file: {os.path.basename(mesh_path)}")
@@ -285,6 +291,14 @@ class CDataProcessor:
             distances = np.load(distances_file)
         else:
             print(f"  [{split.upper()}] [New File] Sampling points for {name}")
+            print(f"    Mesh vertices: {len(vertices)}, faces: {len(faces)}")
+            print(f"    Sampling params: n_gaussian={self.n_gaussian}, n_uniform={self.n_uniform}, radius={self.radius}")
+            
+            # Add timing to see if it's hanging
+            import time
+            start_time = time.time()
+            
+            print(f"    Starting point sampling...")
             # Sample points using PointCloudProcessor method with config parameters
             sampled_points = self.point_cloud_processor.sample_points(
                 vertices, faces, 
@@ -294,15 +308,24 @@ class CDataProcessor:
                 n_gaussian=self.n_gaussian,
                 n_uniform=self.n_uniform
             )
+            sampling_time = time.time() - start_time
+            print(f"    Point sampling completed in {sampling_time:.2f}s, got {len(sampled_points)} points")
             
             # Compute signed distances (same as PointCloudProcessor)
+            print(f"    Computing signed distances...")
+            sdf_start_time = time.time()
             distances = igl.signed_distance(sampled_points, vertices, faces)[0]
+            sdf_time = time.time() - sdf_start_time
+            print(f"    SDF computation completed in {sdf_time:.2f}s")
             
             # Save data (same format as PointCloudProcessor)
+            print(f"    Saving data...")
             np.save(points_file, sampled_points)
             np.save(distances_file, distances)
+            total_time = time.time() - start_time
             print(f"    Saved {len(sampled_points)} points to {points_file}")
             print(f"    Saved distances to {distances_file}")
+            print(f"    Total processing time: {total_time:.2f}s")
         
         return {
             'mesh_name': name,

@@ -5,6 +5,7 @@ import meshio as meshio
 import polyscope as ps
 from pathlib import Path
 import igl
+from volume.compute_volume import match_volume
 
 """
    Functions for visualization and processing of meshes
@@ -54,20 +55,24 @@ class MeshRenderer:
 class PointCloudProcessor:
     """Pipeline for generating point clouds from meshes"""
     
-    def __init__(self, data_dir="data"):
+    def __init__(self, data_dir="data", target_volume=20):
         self.data_dir = data_dir
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
         self.renderer = MeshRenderer()
+        self.target_volume = target_volume
     
     def load_mesh(self, mesh_file):
-        """Load and normalize mesh"""
+        """Load, normalize, and rescale mesh to target volume"""
         mesh = meshio.read(mesh_file)
         vertices = mesh.points.copy()
+        faces = mesh.cells[0].data
+        # Rescale mesh to target volume
+        vertices, faces = match_volume(vertices, faces, self.target_volume)
         # Rescale vertices to fit in the -1 to 1 cube
         vertices -= np.mean(vertices, axis=0)	
         vertices /= np.max(np.abs(vertices))
-        faces = mesh.cells[0].data
+        
         name = Path(mesh_file).stem
         return vertices, faces, name
     
@@ -140,11 +145,6 @@ class PointCloudProcessor:
                 # Save data
                 np.save(points_file, sampled_points)
                 np.save(distances_file, distances)
-            
-            # Visualize on Polyscope
-            self.renderer.render_mesh_with_points(vertices, faces, sampled_points, distances, name, f"{name}_points")
-        
-        self.renderer.show()
     
     def get_dataset_stats(self, mesh_name):
         """Get statistics about generated dataset"""

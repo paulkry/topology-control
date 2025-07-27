@@ -684,6 +684,19 @@ class CModelTrainer:
             print(f"✓ Best model restored from epoch {best_epoch}")
             # Always overwrite best_model.pth in models/
             best_model_path = os.path.join(model_dir, 'best_model.pth')
+            # Find best train loss and val loss for this epoch
+            best_train_loss_val = None
+            best_val_loss_val = None
+            if training_history:
+                for h in training_history:
+                    if h['epoch'] == best_epoch:
+                        best_train_loss_val = h['train_loss']
+                        break
+            if validation_history := locals().get('validation_history', None):
+                for v in validation_history:
+                    if v.get('epoch', None) == best_epoch:
+                        best_val_loss_val = v['val_loss']
+                        break
             torch.save({
                 'epoch': best_epoch,
                 'model_state_dict': best_model_state,
@@ -691,11 +704,16 @@ class CModelTrainer:
                 'latent_vectors': best_latent_state.detach().cpu() if best_latent_state is not None else None,
                 'config': self.config,
                 'dataset_type': self.dataset_type,
+                'train_loss': best_train_loss_val,
+                'val_loss': best_val_loss_val,
                 'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
             }, best_model_path)
 
         # Always save latest checkpoint to checkpoints/ (after training loop, not per-epoch)
         latest_checkpoint_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pth')
+        # Use last epoch's train/val loss for latest checkpoint
+        last_train_loss = training_history[-1]['train_loss'] if training_history else None
+        last_val_loss = validation_history[-1]['val_loss'] if validation_history and 'val_loss' in validation_history[-1] else None
         torch.save({
             'epoch': best_epoch,
             'model_state_dict': model.state_dict(),
@@ -703,6 +721,8 @@ class CModelTrainer:
             'latent_vectors': latent_vectors.detach().cpu() if latent_vectors is not None else None,
             'config': self.config,
             'dataset_type': self.dataset_type,
+            'train_loss': last_train_loss,
+            'val_loss': last_val_loss,
             'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
         }, latest_checkpoint_path)
 
