@@ -1,0 +1,20 @@
+{
+  "experiment_id": "20250726_193600",
+  "total_training_time": 4704.10293006897,
+  "best_epoch": 9987,
+  "best_train_loss": 0.004725352860987186,
+  "best_val_loss": 0.00034183889511041343,
+  "final_train_loss": 0.004761230666190386,
+  "final_val_loss": 0.00034183889511041343,
+  "total_epochs": 10000,
+  "model_parameters": 8442,
+  "run_directory": "/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250726_193600/training_artifacts/run_20250726_193605",
+  "saved_artifacts": {
+    "best_model": "/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250726_193600/training_artifacts/run_20250726_193605/models/best_model.pth",
+    "final_complete": "/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250726_193600/training_artifacts/run_20250726_193605/models/final_model_complete.pth",
+    "latest_checkpoint": "/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250726_193600/training_artifacts/run_20250726_193605/checkpoints/latest_checkpoint.pth",
+    "training_config": "/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250726_193600/training_artifacts/run_20250726_193605/configs/training_config.json"
+  },
+  "status": "completed",
+  "timestamp": "2025-07-26 20:57:35"
+}
