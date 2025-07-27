@@ -5,11 +5,7 @@ import meshio as meshio
 import polyscope as ps
 from pathlib import Path
 import igl
-from volume.compute_volume import match_volume
-
-"""
-   Functions for visualization and processing of meshes
-"""
+from volume.compute_volume_genus import match_volume
 
 class MeshRenderer:
     """Dedicated class for mesh visualization"""

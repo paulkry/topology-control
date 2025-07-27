@@ -1,6 +1,3 @@
-"""
-Evaluate the SDF model and extract meshes from learned representations.
-"""
 import torch
 import numpy as np
 import polyscope as ps
@@ -50,7 +47,6 @@ class CEvaluator:
             num_workers=0
         )
         
-        # Get volume coordinates - FIX: Use consistent resolution calculation
         volume_processor = VolumeProcessor(device='cpu', resolution=self.resolution)
         all_coords, actual_grid_size = volume_processor._get_volume_coords(device='cpu', resolution=self.resolution)
         

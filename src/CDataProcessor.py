@@ -1,12 +1,9 @@
-"""
-Data Processing for Topology Control
-"""
 import os
 import numpy as np
 import meshio as meshio
 import igl
 from src.CGeometryUtils import PointCloudProcessor, VolumeProcessor
-from volume.compute_volume import compute_volume
+from volume.compute_volume_genus import compute_volume
   
 class CDataProcessor:
     def __init__(self, config):

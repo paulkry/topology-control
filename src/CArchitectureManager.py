@@ -1,9 +1,5 @@
 import torch
 
-# ============================================================================
-# Models
-# ============================================================================
-
 class SimpleMLP(torch.nn.Module):
     def __init__(self, input_dim=3, hidden_dims=[128, 64, 32], output_dim=1, activation='relu', dropout=0.1):
         """
@@ -119,8 +115,8 @@ class DeepSDF(torch.nn.Module):
         if config is None:
             config = {}
         
-        self.z_dim = config.get('z_dim', 128)  # Latent vector dimension
-        self.layer_size = config.get('layer_size', 256)  # Hidden layer dimension
+        self.z_dim = config.get('z_dim', 128) 
+        self.layer_size = config.get('layer_size', 256)  
         self.coord_dim = config.get('coord_dim', 3)  # 3D coordinates
         
         self.input_dim = self.z_dim + self.coord_dim
@@ -130,13 +126,12 @@ class DeepSDF(torch.nn.Module):
         # Build network layers
         input_dim = self.z_dim + self.coord_dim  # latent + coordinates
         
-        # Ensure layer_size is large enough for introducing a connectino skip
+        # Ensure layer_size is large enough by adding a buffer
         min_layer_size = max(self.layer_size, input_dim + 32)  
         self.layer_size = min_layer_size
         
         self.input_layer = self.create_layer_block(input_dim, self.layer_size)
         self.layer2 = self.create_layer_block(self.layer_size, self.layer_size - input_dim)
-        # Skip connection happens on layer 3 (concatenate with original input)
         self.layer3 = self.create_layer_block(self.layer_size, self.layer_size)
         self.output_layer = torch.nn.Linear(self.layer_size, 1)
         
@@ -144,7 +139,6 @@ class DeepSDF(torch.nn.Module):
         self._initialize_weights()
     
     def _initialize_weights(self):
-        """Initialize network weights using Xavier/Glorot initialization."""
         for module in self.modules():
             if isinstance(module, torch.nn.Linear):
                 torch.nn.init.xavier_normal_(module.weight)
@@ -193,10 +187,9 @@ class DeepSDF(torch.nn.Module):
         x = x.view(-1, x.shape[-1])
         skip_x_flat = skip_x.view(-1, skip_x.shape[-1])
         
-        # Forward pass through 4-layer network
+        # Forward pass 
         x = self.input_layer(x) # [batch*coords, layer_size]
         x = self.layer2(x) # [batch*coords, layer_size - input_dim]
-        
         # Skip connection and concatenate with original input
         x = self.layer3(torch.cat([x, skip_x_flat], dim=-1)) # [batch*coords, layer_size]
         x = self.output_layer(x) # [batch*coords, 1]
@@ -206,11 +199,9 @@ class DeepSDF(torch.nn.Module):
         x = x.view(original_shape[0], original_shape[1], -1)
         x = x.squeeze(-1)
         
-        # Apply tanh activation to bound SDF values
         return x.tanh()
     
     def get_architecture_info(self):
-        """Get information about the network architecture."""
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         
@@ -253,11 +244,9 @@ class DeepSDF(torch.nn.Module):
 # ARCHITECTURE MANAGER
 # ============================================================================
 class CArchitectureManager:
-    """Main manager for neural network architectures"""
     def __init__(self, config):
         self.config = config
         
-        # Registry of available architectures
         self.architecture_registry = {
             'mlp': SimpleMLP,
             'deepsdf': DeepSDF,
@@ -273,7 +262,6 @@ class CArchitectureManager:
         Returns:
             nn.Module: Configured neural network model
         """
-        # Get architecture configuration
         architecture_name = self.config['model_name'].lower()
         architecture_config = self.config.get('architecture', {}).get(architecture_name, {})
         
@@ -298,23 +286,18 @@ class CArchitectureManager:
             available = list(self.architecture_registry.keys())
             raise ValueError(f"Unknown architecture '{architecture_name}'. Available: {available}")
         
-        # Create model with appropriate configuration
         model_class = self.architecture_registry[architecture_name]
         
         if architecture_name == 'mlp':
-            # SimpleMLP expects individual parameters
             model = model_class(**architecture_config)
         elif architecture_name == 'deepsdf':
-            # DeepSDF expects a config dict
             model = model_class(config=architecture_config)
         else:
-            # Default: try passing config dict
             model = model_class(architecture_config)
         
         # Use float32 for better compatibility and performance
         model = model.float()
         
-        # Move to device if specified
         if device is not None:
             model = model.to(device)
         

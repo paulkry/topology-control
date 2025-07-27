@@ -1,14 +1,3 @@
-"""
-Pipeline orchestrator for 3D shape analysis.
-
-Manages the complete ML pipeline:
-- Data processing
-- Model building
-- Training/Loading
-- Evaluation
-- Artifact management
-"""
-
 from src.CDataProcessor import CDataProcessor
 from src.CModelTrainer import CModelTrainer
 from src.CEvaluator import CEvaluator
@@ -51,23 +40,18 @@ class CPipelineOrchestrator:
         try:
             self._log_experiment_start()
             
-            # Step 1: Data Processing
             self._current_step = 'data_processing'
             self._process_data_step(pipeline_state)
             
-            # Step 2: Model Building
             self._current_step = 'model_building'
             self._build_model_step(pipeline_state)
             
-            # Step 3: Training (or Loading)
             self._current_step = 'training'
             self._train_model_step(pipeline_state)
             
-            # # Step 4: Evaluation
             self._current_step = 'evaluation'
             self._evaluate_model_step(pipeline_state)
             
-            # Save final summary
             self._save_pipeline_summary(pipeline_state)
             print("\n=== Pipeline Completed Successfully ===")
             
@@ -117,7 +101,7 @@ class CPipelineOrchestrator:
     def _log_experiment_start(self):
         """Log experiment information."""
         print("=" * 50)
-        print("🚀 STARTING ML PIPELINE")
+        print("STARTING PIPELINE")
         print("=" * 50)
         experiment_summary = self.artifact_manager.get_experiment_summary()
         print(f"📋 Experiment ID: {experiment_summary['experiment_id']}")

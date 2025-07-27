@@ -8,11 +8,7 @@ import trimesh
 import torch
 import os
 from tqdm import tqdm
-<<<<<<< Updated upstream:volume/compute_volume_genus.py
 from typing import List
-=======
-import gpytoolbox as gpy
->>>>>>> Stashed changes:volume/compute_volume.py
 
 from volume.sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
 from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
@@ -73,8 +69,6 @@ def predict_sdf(latent, coords, model, type=COORDS_FIRST):
 
     return sdf_values
 
-
-
 def compute_genus(vertices, faces):
     """
     Compute the genus of the object represented by the latent code.
@@ -116,7 +110,7 @@ def match_volume(vertices, faces, target_volume=10):
 
     return mesh.vertices, mesh.faces
 
-    #start regularization to preserve topology and optimize path in latent space
+#start regularization to preserve topology and optimize path in latent space
 def L_topology(latent, coords, model, type=COORDS_FIRST):
     sdf = predict_sdf(latent, coords, model, type)
     grad_outputs = torch.ones_like(sdf, requires_grad=False)
@@ -187,7 +181,6 @@ def generate_latent_volume_data(n, model):
                  latents=latents.numpy().astype(np.float32),
                  volumes=np.array(volumes, dtype=np.float32),
                  genera=np.array(genera, dtype=np.int8))
-    
 
 def generate_syn_latent_volume_data(num_samples):
     data_dir = os.path.join(VOLUME_DIR, "data") # volume/data
@@ -220,18 +213,10 @@ def generate_syn_latent_volume_data(num_samples):
 
 if __name__ == "__main__":
     #----------------------------------------------------------------
-    
-    V_torus, F_torus = gpy.read_mesh('/Users/marina.levay/Documents/GitHub/topology-control/data/raw/teapot.obj')
-    V_cup, F_cup = gpy.read_mesh('/Users/marina.levay/Documents/GitHub/topology-control/data/raw/cup.obj')
 
-<<<<<<< Updated upstream:volume/compute_volume_genus.py
+    # Data Generation
+    model_path = "trained_deepsdfs/sdfnet_model.pt"
+    scripted_model = torch.jit.load(model_path).to(DEV)
+
     generate_latent_volume_data(2000, scripted_model)
     # generate_syn_latent_volume_data(2000)
-    
-=======
-    V_torus_scaled, F_torus_scaled = match_volume(V_torus, F_torus)
-
-    volume_torus = compute_volume(V_torus_scaled, F_torus_scaled)
-
-    print(f"Torus volume: {volume_torus}, scaled to match target volume: 10")
->>>>>>> Stashed changes:volume/compute_volume.py

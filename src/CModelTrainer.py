@@ -1,7 +1,3 @@
-"""
-Model training pipeline for 3D shape classification.
-Handles training, validation, and model checkpointing.
-"""
 import torch
 import torch.nn as nn
 import torch.optim as optim

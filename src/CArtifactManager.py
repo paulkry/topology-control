@@ -1,7 +1,5 @@
-"""
-Artifact Management for Topology Control Pipeline
-"""
 import os
+import torch
 import datetime
 import json
 import base64
@@ -328,8 +326,6 @@ class CArtifactManager:
             str: Full path to the saved model file
         """
         try:
-            import torch
-            
             # Generate filename with timestamp and metadata
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
