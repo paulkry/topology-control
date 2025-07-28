@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from config import DEV
+from volume.config import DEV
 
 def sdf_torus(p, t = torch.tensor([0.35, 0.175])):
     """

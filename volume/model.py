@@ -1,5 +1,5 @@
 from torch import nn
-from config import LAYER_SIZE
+from volume.config import LAYER_SIZE
 
 class Latent2Volume(nn.Module):
     """

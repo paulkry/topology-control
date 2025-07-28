@@ -5,12 +5,16 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 from scipy.interpolate import griddata
 import os
-# import pyvista as pv
-
-from compute_volume_genus import get_volume_coords, generate_mesh_from_latent, predict_sdf, generate_mesh_from_sdf, compute_volume, compute_genus
-from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
-from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
 import polyscope.imgui as psim
+
+from src.CPipelineOrchestrator import CPipelineOrchestrator
+from src.CModelTrainer import SDFDataset
+from src.CEvaluator import CEvaluator
+from src.CGeometryUtils import VolumeProcessor
+
+from volume.compute_volume_genus import get_volume_coords, generate_mesh_from_latent, predict_sdf, generate_mesh_from_sdf, compute_volume, compute_genus
+from volume.sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
+from volume.config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
 
 def set_color(alpha, tolerance=0.1):
     # low tolerance means shape will go to red more quickly
@@ -245,22 +249,20 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.show()
 
 if __name__ == "__main__":
-    # sdf_interpolator = SDF_interpolator(sdf_sphere, sdf_torus, sdf_2_torus)
+    orc = CPipelineOrchestrator(r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\config\config.yaml")
 
-    # visualize_latent_vs_genera()
-    # visualize_sdf(sdf_interpolator, latent=torch.tensor([0.29890096, 0.16535072]))
 
     # from compute_path import compute_path
-    from compute_path import compute_path
+    from volume.compute_path import compute_path
      # from compute_path_with_geodesic import compute_geodesic_path
-    from model import Latent2Volume, Latent2Genera
+    from volume.model import Latent2Volume, Latent2Genera
 
-    checkpoint = torch.load("checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)["model_state_dict"]
+    checkpoint = torch.load("volume/checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)["model_state_dict"]
     volume_regressor = Latent2Volume(LATENT_DIM).to(DEV)
     volume_regressor.load_state_dict(checkpoint)
     volume_regressor.eval()
 
-    checkpoint = torch.load("checkpoints/latent2genera_best.pt", map_location=DEV)["model_state_dict"]
+    checkpoint = torch.load("volume/checkpoints/latent2genera_best.pt", map_location=DEV)["model_state_dict"]
     genus_classifier = Latent2Genera(LATENT_DIM, num_classes=6).to(DEV)
     genus_classifier.load_state_dict(checkpoint)
     genus_classifier.eval()
@@ -279,8 +281,10 @@ if __name__ == "__main__":
     visualize_2d_path(volume_regressor, path=path)
 
     # Visualizing the 3d shapes from the paths
-    model_path = os.path.join(VOLUME_DIR, "trained_deepsdfs", "sdfnet_model.pt")
-    deepsdf = torch.jit.load(model_path).to(DEV)
+    deepsdf_path = os.path.join("volume", "trained_deepsdfs", "best_model.pth")
+    ckpt = torch.load(deepsdf_path)
+    deepsdf = orc.architecture_manager.get_model().to(DEV)
+    deepsdf.load_state_dict(ckpt['model_state_dict'])
 
     # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
     # path = torch.tensor(path, dtype=torch.float32)
