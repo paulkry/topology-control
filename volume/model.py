@@ -1,49 +1,65 @@
+import torch 
 from torch import nn
 from volume.config import LAYER_SIZE
 
 class Latent2Volume(nn.Module):
-    """
-    A simple regressor model
-    """
-    def __init__(self, input_dim, layer_size = LAYER_SIZE, dropout_p = 0.2, num_layers = 4):
-        super(Latent2Volume, self).__init__()
-        self.dropout_p = dropout_p
-        
-        layers = []
-
-        layers.append(nn.Linear(input_dim, layer_size))
-        for i in range(num_layers - 1):
-            layers.append(nn.Linear(layer_size, layer_size))
-            layers.append(nn.ReLU())
-            layers.append(nn.Dropout(self.dropout_p))
-        
-        layers.append(nn.Linear(layer_size, 1))
-
-        self.net = nn.Sequential(*layers)
-        
-
-    def forward(self, latent_vec):
-        """
-        latent_vec has shape [batch_size, z_dim]
-        """
-        return self.net(latent_vec).squeeze(-1) # [batch_size]
-    
-
-class Latent2Genera(nn.Module):
-    """
-    A simple classifier model
-    """
-    def __init__(self, input_dim, hidden_dim = LAYER_SIZE, num_classes = 5, num_layers=4, min_genus = 0):
+    def __init__(self, input_dim, layer_size=LAYER_SIZE, dropout_p=0.2):
         super().__init__()
-        
-        layers = [nn.Linear(input_dim, hidden_dim)]
-        
-        for i in range(num_layers - 1):
-            layers.append(nn.Linear(hidden_dim, hidden_dim))
-            layers.append(nn.ReLU())
-        
-        layers.append(nn.Linear(hidden_dim, num_classes))
-        self.net = nn.Sequential(*layers)
+        self.input_dim = input_dim
+        self.layer_size = layer_size
 
-    def forward(self, x):
-        return self.net(x)
+        def create_layer_block(input_size, output_size):
+            return nn.Sequential(
+                nn.Linear(input_size, output_size),
+                nn.ReLU(),
+                nn.Dropout(dropout_p)
+            )
+
+        self.input_layer = create_layer_block(input_dim, layer_size)
+        self.layer2 = create_layer_block(layer_size, layer_size - input_dim)
+        self.layer3 = create_layer_block(layer_size, layer_size)
+        self.output_layer = nn.Linear(layer_size, 1)
+
+    def forward(self, latent, coords):
+        if latent.dim() == 1:
+            latent = latent.unsqueeze(0)  # [1, z_dim]
+        if coords.dim() == 1:
+            coords = coords.unsqueeze(0)  # [1, 3]
+        x = torch.cat([latent, coords], dim=1)  # [N, z_dim + 3]
+        x1 = self.input_layer(x)
+        x2 = self.layer2(x1)
+        x_cat = torch.cat([x2, x], dim=-1)
+        x3 = self.layer3(x_cat)
+        out = self.output_layer(x3)
+        return out.squeeze(-1)
+    
+class Latent2Genera(nn.Module):
+    def __init__(self, input_dim, layer_size=LAYER_SIZE):
+        super().__init__()
+        self.input_dim = input_dim
+        self.layer_size = layer_size
+
+        def create_layer_block(input_size, output_size):
+            return nn.Sequential(
+                nn.Linear(input_size, output_size),
+                nn.ReLU()
+            )
+
+        self.input_layer = create_layer_block(input_dim, layer_size)
+        self.layer2 = create_layer_block(layer_size, layer_size - input_dim)
+        self.layer3 = create_layer_block(layer_size, layer_size)
+        self.output_layer = nn.Linear(layer_size, 1)
+
+    def forward(self, latent, coords):
+        # Ensure both are 2D
+        if latent.dim() == 1:
+            latent = latent.unsqueeze(0)  # [1, z_dim]
+        if coords.dim() == 1:
+            coords = coords.unsqueeze(0)  # [1, 3]
+        x = torch.cat([latent, coords], dim=1)  # [N, z_dim + 3]
+        x1 = self.input_layer(x)
+        x2 = self.layer2(x1)
+        x_cat = torch.cat([x2, x], dim=-1)
+        x3 = self.layer3(x_cat)
+        out = self.output_layer(x3)
+        return out.squeeze(-1)

@@ -6,16 +6,11 @@ from matplotlib.colors import ListedColormap
 from scipy.interpolate import griddata
 import os
 # import pyvista as pv
-from volume.compute_volume_genus import get_volume_coords, generate_mesh_from_latent, predict_sdf, generate_mesh_from_sdf, compute_volume, compute_genus
-from volume.sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
-from volume.config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
+
+from compute_volume_genus import get_volume_coords, generate_mesh_from_latent, predict_sdf, generate_mesh_from_sdf, compute_volume, compute_genus
+from sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
+from config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
 import polyscope.imgui as psim
-
-from src.CPipelineOrchestrator import CPipelineOrchestrator
-from src.CModelTrainer import SDFDataset
-from src.CEvaluator import CEvaluator
-from src.CGeometryUtils import VolumeProcessor
-
 
 def set_color(alpha, tolerance=0.1):
     # low tolerance means shape will go to red more quickly
@@ -26,19 +21,12 @@ def set_color(alpha, tolerance=0.1):
     return np.clip(ret, 0, 1)
 
 def create_interpolation_function(data_array):
-    data_array = np.asarray(data_array)
-    if data_array.ndim != 2:
-        raise ValueError(f"data_array must be 2D, got shape {data_array.shape}")
+    # converts array into continuous function between 0 and 1
     xp = np.linspace(0, 1, len(data_array))
+
     def interp_func(x):
-        x = np.asarray(x)
-        if x.ndim == 0:
-            return torch.tensor([np.interp(x, xp, data_array[:, latent_dim]) for latent_dim in range(data_array.shape[1])], dtype=torch.float32)
-        else:
-            return torch.stack([
-                torch.tensor([np.interp(xi, xp, data_array[:, latent_dim]) for latent_dim in range(data_array.shape[1])], dtype=torch.float32)
-                for xi in x
-            ])
+        return torch.tensor([np.interp(x, xp, data_array[:, latent_dim]) for latent_dim in range(data_array.shape[1])], dtype=torch.float32)
+
     return interp_func
 
 def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST): 
@@ -61,14 +49,12 @@ def visualize_sdf(sdf, latent=torch.tensor([0.1, 0.7]), type=COORDS_FIRST):
     
     ps.show()
 
+
+import polyscope.imgui as psim
+
 def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifier, type=COORDS_FIRST):
-    
     curr_frame = 0
-
-    # Convert path to tensor if it's a list
-    if isinstance(path, list):
-        path = torch.stack(path)
-
+    
     coords, grid_size = get_volume_coords(resolution=50)
     path_function = create_interpolation_function(path.cpu().numpy())
     
@@ -98,10 +84,8 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifi
         update_frame = path_updated or any(latent_updateds)
         
         if update_frame:
-            # Expand latent to match coords batch size
-            latent_batch = latent.expand(coords.shape[0], -1).to(DEV)
-            pred_volume = volume_regressor(latent_batch, coords).mean().item()
-            pred_genus = genus_classifier(latent_batch, coords).view(-1).argmax().item()
+            pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
+            pred_genus = genus_classifier(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
 
             sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
             current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
@@ -130,9 +114,8 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifi
     volume = compute_volume(current_V, current_F).item()
     genus = compute_genus(current_V, current_F)
 
-    latent_batch = latent.expand(coords.shape[0], -1).to(DEV)
-    pred_volume = volume_regressor(latent_batch, coords).mean().item()
-    pred_genus = genus_classifier(latent_batch, coords).view(-1).argmax().item()
+    pred_volume = volume_regressor(latent.unsqueeze(0).to(DEV)).view(-1).item()
+    pred_genus = genus_classifier(latent.unsqueeze(0).to(DEV)).view(-1).argmax().item()
 
     AVG_VOLUME = volume
     volume_fraction = volume / AVG_VOLUME
@@ -262,20 +245,22 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.show()
 
 if __name__ == "__main__":
-    orc = CPipelineOrchestrator(r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\config\config.yaml")
+    # sdf_interpolator = SDF_interpolator(sdf_sphere, sdf_torus, sdf_2_torus)
 
+    # visualize_latent_vs_genera()
+    # visualize_sdf(sdf_interpolator, latent=torch.tensor([0.29890096, 0.16535072]))
 
     # from compute_path import compute_path
-    from volume.compute_path import compute_path
+    from compute_path import compute_path
      # from compute_path_with_geodesic import compute_geodesic_path
-    from volume.model import Latent2Volume, Latent2Genera
+    from model import Latent2Volume, Latent2Genera
 
-    checkpoint = torch.load("volume/checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)["model_state_dict"]
+    checkpoint = torch.load("checkpoints/latent2volume_best_yuan2.pt", map_location=DEV)["model_state_dict"]
     volume_regressor = Latent2Volume(LATENT_DIM).to(DEV)
     volume_regressor.load_state_dict(checkpoint)
     volume_regressor.eval()
 
-    checkpoint = torch.load("volume/checkpoints/latent2genera_best.pt", map_location=DEV)["model_state_dict"]
+    checkpoint = torch.load("checkpoints/latent2genera_best.pt", map_location=DEV)["model_state_dict"]
     genus_classifier = Latent2Genera(LATENT_DIM, num_classes=6).to(DEV)
     genus_classifier.load_state_dict(checkpoint)
     genus_classifier.eval()
@@ -294,10 +279,8 @@ if __name__ == "__main__":
     visualize_2d_path(volume_regressor, path=path)
 
     # Visualizing the 3d shapes from the paths
-    deepsdf_path = os.path.join("volume", "trained_deepsdfs", "best_model.pth")
-    ckpt = torch.load(deepsdf_path)
-    deepsdf = orc.architecture_manager.get_model().to(DEV)
-    deepsdf.load_state_dict(ckpt['model_state_dict'])
+    model_path = os.path.join(VOLUME_DIR, "trained_deepsdfs", "sdfnet_model.pt")
+    deepsdf = torch.jit.load(model_path).to(DEV)
 
     # path = [[0, 0], [0, 1], [1, 0], [0.4, 0], [0, 0.4], [0.29890096, 0.16535072]]
     # path = torch.tensor(path, dtype=torch.float32)

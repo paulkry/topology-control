@@ -292,7 +292,6 @@ class CModelTrainer:
             print(f"✓ Checkpoint loaded from: {filepath}")
             print(f"  Epoch: {checkpoint['epoch']}")
             print(f"  Train Loss: {checkpoint['train_loss']:.6f}")
-            print(f"  Val Loss: {checkpoint['val_loss']:.6f}")
             
             return checkpoint
             

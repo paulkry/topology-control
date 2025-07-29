@@ -125,13 +125,9 @@ class DeepSDF(torch.nn.Module):
         
         # Build network layers
         input_dim = self.z_dim + self.coord_dim  # latent + coordinates
-        
-        # Ensure layer_size is large enough by adding a buffer
-        min_layer_size = max(self.layer_size, input_dim + 32)  
-        self.layer_size = min_layer_size
-        
+
         self.input_layer = self.create_layer_block(input_dim, self.layer_size)
-        self.layer2 = self.create_layer_block(self.layer_size, self.layer_size - input_dim)
+        self.layer2 = self.create_layer_block(self.layer_size, self.layer_size - self.input_dim)
         self.layer3 = self.create_layer_block(self.layer_size, self.layer_size)
         self.output_layer = torch.nn.Linear(self.layer_size, 1)
         

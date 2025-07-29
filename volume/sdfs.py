@@ -54,7 +54,7 @@ def sdf_solid_angle(p, c=torch.tensor([np.sin(np.pi/4), np.cos(np.pi/4)]), radiu
     return torch.max(l, m * s)
 
 def sdf_sphere(query_points, radius = 0.37):
-    dist = torch.linalg.norm(query_points, axis=-1)
+    dist = torch.linalg.norm(query_points, dim=-1)
     return dist - radius
 
 def sdf_box(p: torch.Tensor, b = torch.tensor([0.16, 0.33, 0.50])) -> torch.Tensor:

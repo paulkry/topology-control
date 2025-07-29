@@ -1,4 +1,3 @@
-from typing import List
 import igl
 import polyscope as ps
 import numpy as np
@@ -8,10 +7,9 @@ import trimesh
 import torch
 import os
 from tqdm import tqdm
-from typing import List
 
-from volume.sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
-from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
+from sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
+from config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
 
 def generate_mesh_from_sdf(sdf, coords, grid_size):
     vertices, faces, e2v = igl.marching_cubes(
@@ -34,7 +32,7 @@ def get_volume_coords(resolution = 50):
     """Get 3-dimensional vector (M, N, P) according to the desired resolutions
     on the [-1, 1]^3 cube"""
     # Define grid
-    grid_values = torch.arange(-1, 1, float(1/resolution)).to(DEV) # e.g. 50 resolution -> 1/50 
+    grid_values = torch.arange(-.7, .7, float(1/resolution)).to(DEV) # e.g. 50 resolution -> 1/50 
     grid = torch.meshgrid(grid_values, grid_values, grid_values)
     
     grid_size_axis = grid_values.shape[0]
@@ -44,45 +42,43 @@ def get_volume_coords(resolution = 50):
 
     return coords, grid_size_axis
 
+
 def predict_sdf(latent, coords, model, type=COORDS_FIRST):
-    # Standardized: always call model(latent, coords) with correct shapes
+
+    sdf_values = torch.tensor([], dtype=torch.float32).view(1, 0).to(DEV)
+
+    # Split coords into batches because of memory limitations
+    coords_batches = torch.split(coords, 100_000)
+
     model.eval()
     with torch.no_grad():
-        # Detect DeepSDF by class name or flag
-        is_deepsdf = hasattr(model, "deepsdf") and model.deepsdf_flag or model.__class__.__name__.lower().startswith("deepsdf")
-        if is_deepsdf:
-            # DeepSDF expects: latent [1, z_dim], coords [1, N, 3]
-            latent_batch = latent.unsqueeze(0) if latent.dim() == 1 else latent  # [1, z_dim]
-            if coords.dim() == 2:
-                coords_batch = coords.unsqueeze(0)  # [1, N, 3]
-            elif coords.dim() == 3:
-                coords_batch = coords  # [1, N, 3]
+        for coords in coords_batches:
+            if type==COORDS_FIRST:
+                latent_batch = latent.unsqueeze(0).to(DEV)
+                sdf_batch = model(latent_batch, coords)
+            elif type==LATENT_FIRST:
+                # expects a tiled latent vec
+                latent_batch = torch.tile(latent.unsqueeze(0), (coords.shape[0], 1)).to(DEV)
+                sdf_batch = model(coords, latent_batch)
             else:
-                raise ValueError(f"coords must be [N, 3] or [1, N, 3], got {coords.shape}")
-        else:
-            # Latent2Volume/Latent2Genera expect: [N, z_dim], [N, 3]
-            coords_batch = coords if coords.dim() == 2 else coords.squeeze(0)    # [N, 3]
-            latent_batch = latent.expand(coords_batch.shape[0], -1) if latent.dim() == 1 else latent
-        sdf_batch = model(latent_batch.to(DEV), coords_batch.to(DEV))
-    return sdf_batch.unsqueeze(0)  # [1, N]
+                raise "Invalid type"
+            # sdf_batch = model(latent_batch, coords)
+            sdf_values = torch.hstack((sdf_values, sdf_batch.view(1, -1)))        
+
+    return sdf_values
+
+
 
 def compute_genus(vertices, faces):
     """
     Compute the genus of the object represented by the latent code.
     """
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    # compute genus using: V - E + F = 2 - 2G
+    V = vertices.shape[0]
+    E = len(set(tuple(sorted(edge)) for face in faces for edge in [(face[i], face[(i+1) % 3]) for i in range(3)]))
+    F = faces.shape[0]
 
-    V = mesh.vertices.shape[0]
-    E = mesh.edges_unique.shape[0]
-    F = mesh.faces.shape[0]
-
-    # Check for connected components (for multi-component genus computation)
-    boundaries = mesh.edges[trimesh.grouping.group_rows(mesh.edges_sorted, require_count=1)]
-    B = len(trimesh.graph.connected_components(boundaries))
-    C = len(mesh.split(only_watertight=False))
-
-    euler_char = V - E + F
-    genus = (2 * C - euler_char - B) // 2
+    genus = (2 - (V - E + F)) // 2
 
     return genus
 
@@ -98,16 +94,7 @@ def compute_volume(vertices, faces):
         
     return volume
 
-def match_volume(vertices, faces, target_volume=10):
-    volume = compute_volume(vertices, faces)
-
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    scale = (target_volume / abs(volume)) ** (1/3)
-    mesh.apply_scale(scale)
-
-    return mesh.vertices, mesh.faces
-
-#start regularization to preserve topology and optimize path in latent space
+    #start regularization to preserve topology and optimize path in latent space
 def L_topology(latent, coords, model, type=COORDS_FIRST):
     sdf = predict_sdf(latent, coords, model, type)
     grad_outputs = torch.ones_like(sdf, requires_grad=False)
@@ -178,6 +165,7 @@ def generate_latent_volume_data(n, model):
                  latents=latents.numpy().astype(np.float32),
                  volumes=np.array(volumes, dtype=np.float32),
                  genera=np.array(genera, dtype=np.int8))
+    
 
 def generate_syn_latent_volume_data(num_samples):
     data_dir = os.path.join(VOLUME_DIR, "data") # volume/data
@@ -209,11 +197,24 @@ def generate_syn_latent_volume_data(num_samples):
 
 
 if __name__ == "__main__":
-    #----------------------------------------------------------------
 
+    #----------------------------------------------------------------
+    # Making sure SDFs produce similar volumes
+    # interpolator = SDF_interpolator()
+    # volumes = []
+    # coords, grid_size = get_volume_coords(resolution=50)
+
+    # for alpha, beta in [(1, 0), (0, 1), (0, 0)]:
+    #     volume = compute_volume(torch.tensor([alpha, beta]), coords, grid_size, interpolator)
+    #     volumes.append(volume)
+
+    # print(volumes)
+
+    #----------------------------------------------------------------
     # Data Generation
     model_path = "trained_deepsdfs/sdfnet_model.pt"
     scripted_model = torch.jit.load(model_path).to(DEV)
 
-    generate_latent_volume_data(2000, scripted_model)
-    # generate_syn_latent_volume_data(2000)
+    # generate_latent_volume_data(2000, scripted_model)
+    generate_syn_latent_volume_data(2000)
+    
