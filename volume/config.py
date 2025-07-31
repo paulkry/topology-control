@@ -4,13 +4,13 @@ from enum import Enum
 
 current_file_path = os.path.abspath(__file__) # Absolute path to the current file
 VOLUME_DIR = os.path.dirname(current_file_path) # Directory containing the file
-LATENT_DIM = 2
+LATENT_DIM = 4
 BATCH_SIZE = 32
 LR = 1e-3  # scale depending on batch
 DEV = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS = 300
 LAYER_SIZE = 128
-LATENT_VEC_MAX = 2 # what is the max entry of latent vec dims?
+LATENT_VEC_MAX = 0.6 # what is the max entry of latent vec dims?
 
 """
 whether model(latent, xyz) or model(xyz, latent). i.e., what the model expects

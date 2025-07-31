@@ -262,7 +262,7 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.show()
 
 if __name__ == "__main__":
-    orc = CPipelineOrchestrator(r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\config\config.yaml")
+    orc = CPipelineOrchestrator(r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\config\config_examples.yaml")
 
 
     # from compute_path import compute_path

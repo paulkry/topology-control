@@ -9,9 +9,11 @@ import torch
 import os
 from tqdm import tqdm
 from typing import List
+import yaml
 
 from volume.sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
 from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
+from src.CArchitectureManager import CArchitectureManager
 
 def generate_mesh_from_sdf(sdf, coords, grid_size):
     vertices, faces, e2v = igl.marching_cubes(
@@ -174,6 +176,7 @@ def generate_latent_volume_data(n, model):
         genera.append(compute_genus(vertices, faces))
 
     print(genera)
+    print(volumes)
     np.savez(os.path.join(data_dir, "2d_latents_volumes"),
                  latents=latents.numpy().astype(np.float32),
                  volumes=np.array(volumes, dtype=np.float32),
@@ -211,9 +214,20 @@ def generate_syn_latent_volume_data(num_samples):
 if __name__ == "__main__":
     #----------------------------------------------------------------
 
-    # Data Generation
-    model_path = "trained_deepsdfs/sdfnet_model.pt"
-    scripted_model = torch.jit.load(model_path).to(DEV)
+    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'config_examples.yaml')
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
 
-    generate_latent_volume_data(2000, scripted_model)
+    best_model_path = r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\volume\trained_deepsdfs\best_model.pth"
+
+    arch_manager = CArchitectureManager(config['model_config'])
+    model = arch_manager.get_model().to(DEV)
+    ckpt = torch.load(best_model_path, map_location=DEV)
+    model.load_state_dict(ckpt['model_state_dict'])
+
+    # # Data Generation
+    # model_path = "trained_deepsdfs/sdfnet_model.pt"
+    # scripted_model = torch.jit.load(model_path).to(DEV)
+
+    generate_latent_volume_data(200, model)
     # generate_syn_latent_volume_data(2000)

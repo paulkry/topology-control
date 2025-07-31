@@ -1,4 +1,4 @@
-home: &home_path /Users/marina.levay/Documents/GitHub/topology-control # all other paths are relative to home
+home: &home_path C:\Users\singh\OneDrive\Documents\GitHub\topology-control\ # all other paths are relative to home
 
 artifacts_config:
   save_artifacts_to: artifacts 
@@ -22,7 +22,7 @@ processor_config:
 
   # Volume processor params for SDF generation
   volume_processor_params:
-    device: cpu
+    device: cuda
     resolution: 50  # Match your notebook's resolution = 50
 
 model_config:

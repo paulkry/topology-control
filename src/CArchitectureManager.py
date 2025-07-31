@@ -161,7 +161,8 @@ class DeepSDF(torch.nn.Module):
         if latent_vec.dim() != 2:
             raise ValueError(f"latent_vec must be 2D [batch_size, z_dim], got shape {latent_vec.shape}")
         if coords.dim() != 3:
-            raise ValueError(f"coords must be 3D [batch_size, num_coords, 3], got shape {coords.shape}")
+            coords = coords.unsqueeze(1) if coords.dim() == 2 else coords  # Ensure coords is 3D
+            # raise ValueError(f"coords must be 3D [batch_size, num_coords, 3], got shape {coords.shape}")
         
         batch_size, num_coords, coord_dim = coords.shape
         z_dim = latent_vec.shape[1]

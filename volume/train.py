@@ -5,10 +5,11 @@ from torch import optim
 from torch.utils.data import DataLoader
 from torch import nn 
 import torch
+import yaml
 
-from dataset import VolumeDataset, GeneraDataset
-from model import Latent2Volume, Latent2Genera
-from config import LATENT_DIM, DEV, BATCH_SIZE, LR, EPOCHS, VOLUME_DIR
+from volume.dataset import VolumeDataset, GeneraDataset
+from volume.model import Latent2Volume, Latent2Genera
+from volume.config import LATENT_DIM, DEV, BATCH_SIZE, LR, EPOCHS, VOLUME_DIR
 
 def train_and_save(loader, model, crit, opt, name):
     best_loss = float('inf')
@@ -38,21 +39,24 @@ def train_and_save(loader, model, crit, opt, name):
 
 
 if __name__ == "__main__":
-    # dataset = VolumeDataset(
-    #     dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
-    # )
-
+    dataset = VolumeDataset(
+        dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
+    )
+        
     dataset = GeneraDataset(
         dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
     )
 
-    # model = Latent2Volume(LATENT_DIM).to(DEV)
     model = Latent2Genera(LATENT_DIM, num_classes=dataset.num_classes, min_genus=dataset.min_genus).to(DEV)
-    
-    # crit = nn.L1Loss()
     crit = nn.CrossEntropyLoss()
-    
     opt = optim.Adam(list(model.parameters()), lr=LR)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
 
     train_and_save(loader, model, crit, opt, "genera")
+
+    model = Latent2Volume(LATENT_DIM).to(DEV)
+    crit = nn.L1Loss()
+    opt = optim.Adam(list(model.parameters()), lr=LR)
+    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
+
+    train_and_save(loader, model, crit, opt, "volume")
