@@ -1,5 +1,5 @@
 import torch
-from compute_path import compute_path as prelim_compute_path
+from volume.compute_path import compute_path as prelim_compute_path
 
 def compute_path(latent_A: torch.Tensor,
                  latent_B: torch.Tensor,

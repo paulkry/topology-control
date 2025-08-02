@@ -96,7 +96,7 @@ def compute_volume(vertices, faces):
         faces = np.array(faces)
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    volume = abs(mesh.volume)
+    volume = float(abs(mesh.volume))
         
     return volume
 
@@ -169,13 +169,13 @@ def generate_latent_volume_data(n, model):
     genera = []
 
     coords, grid_size = get_volume_coords(resolution=50)
-    ps.init()
+    # ps.init()
     for i, latent in enumerate(tqdm(latents)):
         vertices, faces = generate_mesh_from_latent(latent, coords, grid_size, model, LATENT_FIRST)
         
-        ps.register_surface_mesh(f"mesh_{i}", vertices, faces)
-        ps.set_up_dir("z_up")
-        ps.show()
+        # ps.register_surface_mesh(f"mesh_{i}", vertices, faces)
+        # ps.set_up_dir("z_up")
+        # ps.show()
 
         volumes.append(compute_volume(vertices, faces))
         genera.append(compute_genus(vertices, faces))
@@ -234,5 +234,5 @@ if __name__ == "__main__":
     # model_path = "trained_deepsdfs/sdfnet_model.pt"
     # scripted_model = torch.jit.load(model_path).to(DEV)
 
-    generate_latent_volume_data(200, model)
+    generate_latent_volume_data(2000, model)
     # generate_syn_latent_volume_data(2000)

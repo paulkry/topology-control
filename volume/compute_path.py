@@ -14,10 +14,10 @@ def compute_path(latent_A, latent_B, model, steps, coords=None):
         
     current_latent = latent_A.clone().detach().requires_grad_(True)
     path = [current_latent.detach().clone()]
-    target_quantity = model(latent_B, coords).detach().requires_grad_(False)
+    target_quantity = model(latent_B).detach().requires_grad_(False)
 
     for steps_remaining in range(steps-1, 1, -1):
-        current_quantity = model(current_latent, coords)
+        current_quantity = model(current_latent)
         current_quantity.backward()
 
         gradient = current_latent.grad.clone()

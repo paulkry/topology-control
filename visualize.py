@@ -100,13 +100,15 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifi
         if update_frame:
             # Expand latent to match coords batch size
             latent_batch = latent.expand(coords.shape[0], -1).to(DEV)
-            pred_volume = volume_regressor(latent_batch, coords).mean().item()
-            pred_genus = genus_classifier(latent_batch, coords).view(-1).argmax().item()
+            pred_volume = volume_regressor(latent_batch).mean().item()
+            pred_genus = genus_classifier(latent_batch).view(-1).argmax().item()
 
             sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
             current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
             volume = compute_volume(current_V, current_F)
             volume_fraction = volume / AVG_VOLUME
+
+            genus = compute_genus(current_V, current_F)
             
             if ps_mesh is not None:
                 ps.remove_surface_mesh("interpolation_mesh")
@@ -127,12 +129,12 @@ def visualize_interpolation_path(deepsdf, path, volume_regressor, genus_classifi
     sdf_values = predict_sdf(latent, coords, deepsdf, type).flatten()
     current_V, current_F = generate_mesh_from_sdf(sdf_values, coords, grid_size)
 
-    volume = compute_volume(current_V, current_F).item()
+    volume = compute_volume(current_V, current_F)
     genus = compute_genus(current_V, current_F)
 
     latent_batch = latent.expand(coords.shape[0], -1).to(DEV)
-    pred_volume = volume_regressor(latent_batch, coords).mean().item()
-    pred_genus = genus_classifier(latent_batch, coords).view(-1).argmax().item()
+    pred_volume = volume_regressor(latent_batch).mean().item()
+    pred_genus = genus_classifier(latent_batch).view(-1).argmax().item()
 
     AVG_VOLUME = volume
     volume_fraction = volume / AVG_VOLUME

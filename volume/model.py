@@ -35,9 +35,11 @@ class Latent2Genera(nn.Module):
     """
     A simple classifier model
     """
-    def __init__(self, input_dim, hidden_dim = LAYER_SIZE, num_classes = 5, num_layers=2, min_genus = 0):
+    def __init__(self, input_dim, hidden_dim = LAYER_SIZE, num_classes = 5, num_layers=4, min_genus=0):
         super().__init__()
-        
+        self.num_classes = num_classes
+        self.min_genus = min_genus
+
         layers = [nn.Linear(input_dim, hidden_dim)]
         
         for i in range(num_layers - 1):
@@ -49,3 +51,7 @@ class Latent2Genera(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+    
+    def inference_forard(self, x):
+        logits = self.net(x)
+        return nn.functional.softmax(logits, dim=-1) + self.min_genus

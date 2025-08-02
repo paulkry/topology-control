@@ -47,6 +47,7 @@ class GeneraDataset(Dataset):
         self.genera = torch.tensor(shifted, dtype=torch.long)
         self.num_classes = gen_max - gen_min + 1
         self.size = self.latents.shape[0]
+        self.gen_min = gen_min
 
     def __getitem__(self, idx):
         return self.latents[idx], self.genera[idx]

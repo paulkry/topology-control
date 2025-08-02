@@ -43,20 +43,22 @@ def train_and_save(loader, model, crit, opt, name):
 
 
 if __name__ == "__main__":
-    dataset = VolumeDataset(
-        dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
-    )
+
         
     dataset = GeneraDataset(
         dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
     )
 
-    model = Latent2Genera(LATENT_DIM).to(DEV)
+    model = Latent2Genera(LATENT_DIM, num_classes=dataset.num_classes, min_genus=dataset.gen_min).to(DEV)
     crit = nn.CrossEntropyLoss()
     opt = optim.Adam(list(model.parameters()), lr=LR)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
 
     train_and_save(loader, model, crit, opt, "genera")
+
+    dataset = VolumeDataset(
+        dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
+    )
 
     model = Latent2Volume(LATENT_DIM).to(DEV)
     crit = nn.L1Loss()
