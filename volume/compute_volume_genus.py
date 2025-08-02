@@ -12,7 +12,7 @@ from typing import List
 import yaml
 
 from volume.sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
-from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM
+from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM, LATENT_VEC_MAX
 from src.CArchitectureManager import CArchitectureManager
 
 def generate_mesh_from_sdf(sdf, coords, grid_size):
@@ -162,16 +162,21 @@ def L_path_combined(latents, coords, model, type=COORDS_FIRST, alpha=1.0, beta=1
 
 def generate_latent_volume_data(n, model):
     # sample from uniform(0, 10)
-    latents = torch.rand(n, LATENT_DIM) * 10
+    latents = torch.rand(n, LATENT_DIM) * LATENT_VEC_MAX * 2 - LATENT_VEC_MAX
     data_dir = os.path.join(VOLUME_DIR, "data") #"volume/data/"
 
     volumes = []
     genera = []
 
     coords, grid_size = get_volume_coords(resolution=50)
-
+    ps.init()
     for i, latent in enumerate(tqdm(latents)):
         vertices, faces = generate_mesh_from_latent(latent, coords, grid_size, model, LATENT_FIRST)
+        
+        ps.register_surface_mesh(f"mesh_{i}", vertices, faces)
+        ps.set_up_dir("z_up")
+        ps.show()
+
         volumes.append(compute_volume(vertices, faces))
         genera.append(compute_genus(vertices, faces))
 
@@ -203,7 +208,7 @@ def generate_syn_latent_volume_data(num_samples):
 
         volumes.append(volume)
         genera.append(genus)
-    print(genera)
+    
     np.savez(os.path.join(data_dir, "2d_latents_volumes.npz"),
                 latents=np.array(latents, dtype=np.float32),
                 volumes=np.array(volumes, dtype=np.float32),

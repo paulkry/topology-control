@@ -37,6 +37,10 @@ def train_and_save(loader, model, crit, opt, name):
             }, os.path.join(VOLUME_DIR, "checkpoints", f"latent2{name}_best.pt"))
             print(f"Best model saved at epoch {e+1} with loss {best_loss:.6f}")
 
+            if avg_loss <= 1e-3:
+                print("Early stopping due to low loss.")
+                break
+
 
 if __name__ == "__main__":
     dataset = VolumeDataset(
@@ -47,7 +51,7 @@ if __name__ == "__main__":
         dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
     )
 
-    model = Latent2Genera(LATENT_DIM, num_classes=dataset.num_classes, min_genus=dataset.min_genus).to(DEV)
+    model = Latent2Genera(LATENT_DIM).to(DEV)
     crit = nn.CrossEntropyLoss()
     opt = optim.Adam(list(model.parameters()), lr=LR)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
