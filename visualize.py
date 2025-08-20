@@ -11,10 +11,7 @@ from volume.sdfs import SDF_interpolator, sdf_2_torus, sdf_torus, sdf_sphere
 from volume.config import DEV, COORDS_FIRST, LATENT_FIRST, VOLUME_DIR, LATENT_VEC_MAX, LATENT_DIM, DEV
 import polyscope.imgui as psim
 
-from src.CPipelineOrchestrator import CPipelineOrchestrator
-from src.CModelTrainer import SDFDataset
-from src.CEvaluator import CEvaluator
-from src.CGeometryUtils import VolumeProcessor
+from deepsdf.PipelineOrchestrator import PipelineOrchestrator
 
 
 def set_color(alpha, tolerance=0.1):
@@ -264,7 +261,8 @@ def _visualize_heatmap(X, Y, Z, pointsX = None, pointsY = None):
     plt.show()
 
 if __name__ == "__main__":
-    orc = CPipelineOrchestrator(r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\config\config_examples.yaml")
+    # Use unified deepsdf PipelineOrchestrator instead of legacy CPipelineOrchestrator
+    orc = PipelineOrchestrator(r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\config\config_examples.yaml")
 
 
     # from compute_path import compute_path

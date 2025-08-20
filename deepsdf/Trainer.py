@@ -10,24 +10,19 @@ import numpy as np
 import os
 import time
 from glob import glob
+from deepsdf.Model import DeepSDF
+
 torch.set_default_dtype(torch.float32)
-from src.CArchitectureManager import DeepSDF
 
 class SDFDataset(Dataset):
-    """
-    SDF Dataset class that uses preprocessed data from CDataProcessor.
-    Compatible with DeepSDF training pipeline - supports latent code learning.
-    """
-    
-    def __init__(self, dataset_info, split='train', fix_seed=False, volume_coords=None):
-        """
-        Initialize dataset from CDataProcessor output.
-        
-        Parameters:
-            dataset_info (dict): Output from CDataProcessor.generate_sdf_dataset()
-            split (str): 'train' or 'val'
-            fix_seed (bool): Whether to fix random seed for reproducibility
-            volume_coords (torch.Tensor): Volume coordinates for additional sampling
+    """SDF dataset backed by pre-generated point clouds + SDF arrays (train only)."""
+    def __init__(self, dataset_info, split='train', fix_seed=False):
+        """Initialize dataset.
+
+        Args:
+            dataset_info (dict): Structure containing '*_files' lists with point & distance npy paths
+            split (str): Dataset split ('train')
+            fix_seed (bool): Reproducibility flag
         """
         self.split = split
         self.fix_seed = fix_seed
@@ -44,9 +39,20 @@ class SDFDataset(Dataset):
         self.latent_vectors = torch.randn(len(self.files), z_dim)
         self.latent_vectors = (self.latent_vectors * latent_sd) + latent_mean
         self.latent_vectors.requires_grad = True
-        
-        # Store volume coordinates for additional sampling if needed
-        self.volume_coords = volume_coords or dataset_info.get('volume_coords')
+
+        # Pre-compute point counts for logging ( number of sampled points per mesh )
+        self.point_counts = []
+        total = 0
+        for f in self.files:
+            try:
+                pts = np.load(f['points_file'], mmap_mode='r')  # lightweight header read
+                n = pts.shape[0]
+            except Exception:
+                n = 0
+            self.point_counts.append(n)
+            total += n
+        self.total_points = int(total)
+        self.avg_points = float(total / len(self.files)) if self.files else 0.0
     
     def __getitem__(self, idx):
         if self.fix_seed:
@@ -56,13 +62,7 @@ class SDFDataset(Dataset):
         file_info = self.files[idx]
         sampled_points = np.load(file_info['points_file'])
         sdf_values = np.load(file_info['distances_file'])
-        
-        # Optional: Add additional random sampling from volume coords
-        if self.volume_coords is not None:
-            num_volume_samples = min(1000, len(self.volume_coords))
-            volume_indices = np.random.choice(len(self.volume_coords), num_volume_samples, replace=False)
-            # volume_points = self.volume_coords[volume_indices].numpy()
-        
+                
         # Convert to tensors
         sampled_points = torch.tensor(sampled_points, dtype=torch.float32)
         sdf_values = torch.tensor(sdf_values, dtype=torch.float32)
@@ -88,77 +88,7 @@ class SDFDataset(Dataset):
     def __len__(self):
         return len(self.files)
 
-class ShapeDataset(Dataset):
-    """Dataset class for 3D shape data (points and signed distances)."""
-    
-    def __init__(self, data_path, split='train', max_points=10000):
-        """
-        Initialize dataset from processed data.
-        
-        Args:
-            data_path: Path to processed data directory
-            split: Either 'train' or 'val'
-            max_points: Maximum number of points to sample from each point cloud
-        """
-        self.data_path = data_path
-        self.split = split
-        self.max_points = max_points
-        
-        # Load all .npy files for this split
-        split_path = os.path.join(data_path, split)
-        if not os.path.exists(split_path):
-            raise ValueError(f"Split directory not found: {split_path}")
-        
-        # Find all point and distance files
-        point_files = sorted(glob(os.path.join(split_path, "*_sampled_points.npy")))
-        distance_files = sorted(glob(os.path.join(split_path, "*_signed_distances.npy")))
-        
-        if len(point_files) != len(distance_files):
-            raise ValueError(f"Mismatch between point files ({len(point_files)}) and distance files ({len(distance_files)})")
-        
-        self.data_pairs = list(zip(point_files, distance_files))
-        
-        if not self.data_pairs:
-            raise ValueError(f"No data files found in {split_path}")
-        
-        print(f"Loaded {len(self.data_pairs)} samples for {split} split (max_points: {max_points})")
-    
-    def __len__(self):
-        return len(self.data_pairs)
-    
-    def __getitem__(self, idx):
-        point_file, distance_file = self.data_pairs[idx]
-        
-        # Load data
-        points = np.load(point_file)
-        distances = np.load(distance_file)
-        
-        # Handle sampling if we have more points than max_points
-        if len(points) > self.max_points:
-            # Randomly sample max_points indices
-            indices = np.random.choice(len(points), self.max_points, replace=False)
-            points = points[indices]
-            distances = distances[indices]
-        elif len(points) < self.max_points:
-            # Pad with zeros if we have fewer points
-            num_pad = self.max_points - len(points)
-            pad_points = np.zeros((num_pad, points.shape[1]))
-            pad_distances = np.zeros(num_pad)
-            
-            points = np.concatenate([points, pad_points], axis=0)
-            distances = np.concatenate([distances, pad_distances], axis=0)
-        
-        # Convert to tensors
-        points = torch.tensor(points, dtype=torch.float32)
-        distances = torch.tensor(distances, dtype=torch.float32)
-        
-        # Flatten points for MLP input (assuming points are [N, 3])
-        if len(points.shape) > 1:
-            points = points.reshape(-1)
-        
-        return points, distances
-
-class CModelTrainer:
+class ModelTrainer:
     """Model trainer for 3D shape classification pipeline."""
     
     def __init__(self, config):
@@ -186,7 +116,6 @@ class CModelTrainer:
             # Use orchestrator's experiment structure
             self.experiment_dir = os.path.join(self.artifacts_base, f'experiment_{self.experiment_id}')
             self.save_dir = os.path.join(self.experiment_dir, 'training_artifacts')
-            print(f"Using orchestrator experiment: {self.experiment_id}")
         else:
             # Fallback to standalone mode
             self.save_dir = config.get('save_dir', 'models/checkpoints')
@@ -198,74 +127,53 @@ class CModelTrainer:
         # Create save directory
         os.makedirs(self.save_dir, exist_ok=True)
         
-        # Dataset type configuration
-        self.dataset_type = config.get('dataset_type', 'shape')
-        
-        print(f"Trainer initialized - Device: {self.device}, Dataset Type: {self.dataset_type}")
-        print(f"Training artifacts will be saved to: {self.save_dir}")
+        self.dataset_type = 'sdf'
+        # Keep a generic learning rate attribute for legacy optimizer path
+        self.learning_rate = self.network_learning_rate
+        print(f"    ✓ Trainer Device: {self.device}")
+        print(f"    ✓ Training artifacts will be saved to: {self.save_dir}")
         
     def create_datasets(self, dataset_info=None):
         """
-        Create datasets based on configuration.
+        Create training dataset.
         
         Args:
             dataset_info: Optional dataset info from CDataProcessor (for SDF datasets)
             
         Returns:
-            tuple: (train_dataset, val_dataset)
+            train_dataset
         """
         
-        if self.dataset_type == 'sdf' and dataset_info is not None:  # <- REMOVE the "and dataset_info is not None" condition
-            # Use SDFDataset - let it handle None dataset_info gracefully
-            train_dataset = SDFDataset(dataset_info, split='train')
-            val_dataset = SDFDataset(dataset_info, split='val')
-        else:
-            # Default to ShapeDataset for traditional point cloud learning
-            train_dataset = ShapeDataset(self.processed_data_path, split='train', max_points=self.max_points)
-            val_dataset = ShapeDataset(self.processed_data_path, split='val', max_points=self.max_points)
-        
-        return train_dataset, val_dataset
+        # Always use SDFDataset; dataset_info must be provided
+        if dataset_info is None:
+            raise ValueError("dataset_info is required for SDF training")
+        train_dataset = SDFDataset(dataset_info, split='train')
+        return train_dataset
     
-    def create_data_loaders(self, train_dataset, val_dataset):
-        """Create data loaders from datasets."""
-        
+    def create_data_loaders(self, train_dataset):
+        """Create data loader for training (no validation)."""
         # Explicitly use the SDFDataset collate function for SDF datasets
         if isinstance(train_dataset, SDFDataset):
             collate_fn = train_dataset.collate_fn
-            
             # Test the collate function directly
             try:
-                # Get a sample from the dataset
                 sample1 = train_dataset[0]
                 sample2 = train_dataset[1] if len(train_dataset) > 1 else train_dataset[0]
                 test_batch = [sample1, sample2]
-                                
-                # Test collate function
-                result = collate_fn(test_batch)
-                
-            except Exception as e:
+                _ = collate_fn(test_batch)
+            except Exception:
                 import traceback
                 traceback.print_exc()
         else:
             collate_fn = None
-        
         train_loader = DataLoader(
-            train_dataset, 
-            batch_size=self.batch_size, 
+            train_dataset,
+            batch_size=self.batch_size,
             shuffle=True,
             collate_fn=collate_fn,
             num_workers=0
         )
-        
-        val_loader = DataLoader(
-            val_dataset, 
-            batch_size=self.batch_size, 
-            shuffle=False,
-            collate_fn=collate_fn,
-            num_workers=0
-        )
-        
-        return train_loader, val_loader
+        return train_loader
             
     def load_checkpoint(self, filepath, model, optimizer=None):
         """
@@ -336,72 +244,6 @@ class CModelTrainer:
             }
             history.append(epoch_data)
         return history, best_model_state, best_optimizer_state, best_latent_state, best_epoch
-
-    def validate(self, model, val_loader, latent_dim, device, epoch=None):
-        """
-        Validation phase: optimize latent vectors for each validation shape using trained decoder.
-        Returns: (validation_history, optimized_latents)
-        """
-        print("Optimizing latent vectors for validation set...\n")
-        
-        model.eval()
-        optimized_latents = []
-        validation_history = []
-
-        # Get learning rates from config
-        lr_net = self.config.get('network_learning_rate', 1e-3)
-        lr_latent = self.config.get('latent_learning_rate', 1e-2)
-
-        for idx, batch in enumerate(val_loader):
-            # For SDFDataset: (coords, latents, targets)
-            if len(batch) == 3:
-                coords, _, sdf_samples = batch
-                coords = coords.squeeze(0).to(device) if coords.dim() == 3 and coords.shape[0] == 1 else coords.to(device)
-                sdf_samples = sdf_samples.squeeze(0).to(device) if sdf_samples.dim() == 3 and sdf_samples.shape[0] == 1 else sdf_samples.to(device)
-            else:
-                # For ShapeDataset: (points, sdf_samples)
-                coords, sdf_samples = batch
-                coords = coords.to(device)
-                sdf_samples = sdf_samples.to(device)
-            # Optimize latent
-            latent = torch.randn(1, latent_dim, requires_grad=True, device=device)
-            # Use separate learning rates for model and latent
-            optimizer = torch.optim.Adam([
-                {"params": model.parameters(), "lr": lr_net},
-                {"params": [latent], "lr": lr_latent}
-            ])
-
-            for step in tqdm(range(self.epochs), desc=f"Shape {idx+1}/{len(val_loader)}", unit="step"):
-                optimizer.zero_grad()
-                # Reshape coords if needed
-                if coords.dim() == 1:
-                    coords_in = coords.unsqueeze(0)
-                else:
-                    coords_in = coords.unsqueeze(0) if coords.dim() == 2 else coords
-                sdf_in = sdf_samples.unsqueeze(0) if sdf_samples.dim() == 1 else sdf_samples
-                sdf_pred = model(latent, coords_in)
-                loss = torch.nn.functional.mse_loss(sdf_pred, sdf_in)
-                loss.backward()
-                optimizer.step()
-
-            optimized_latents.append(latent.detach().cpu())
-            # Compute validation loss for this shape
-            with torch.no_grad():
-                sdf_pred = model(latent, coords_in)
-                val_loss = torch.nn.functional.mse_loss(sdf_pred, sdf_in).item()
-            entry = {
-                'shape_idx': idx,
-                'val_loss': val_loss,
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            # Always record the epoch if available
-            if hasattr(self, 'current_epoch'):
-                entry['epoch'] = self.current_epoch
-            elif epoch is not None:
-                entry['epoch'] = epoch
-            validation_history.append(entry)
-            
-        return validation_history, optimized_latents
 
     def load_best_model(self, run_directory, model, optimizer=None):
         """
@@ -545,34 +387,29 @@ class CModelTrainer:
         
         return total_loss / num_batches if num_batches > 0 else 0.0
     
-    def _create_report(self, training_history, validation_history, best_train_loss, best_val_loss):
-        """Create training report with metrics and visualization for both training and validation."""
+    def _create_report(self, training_history, best_train_loss):
+        """Create training report with metrics and visualization (training only)."""
         if not training_history:
             return {"error": "No training history"}
-        if not validation_history:
-            return {"error": "No validation history"}
         total_time = sum(h['epoch_time'] for h in training_history)
         report = {
             "total_epochs": len(training_history),
             "best_train_loss": best_train_loss,
-            "best_val_loss": best_val_loss,
             "final_train_loss": training_history[-1]['train_loss'],
-            "final_val_loss": validation_history[-1]['val_loss'],
             "total_training_time": total_time,
             "avg_epoch_time": total_time / len(training_history),
             "training_history": training_history,
-            "validation_history": validation_history,
             "dataset_type": self.dataset_type
         }
         # Add loss plot
-        loss_plot = self._create_loss_plot(training_history, validation_history)
+        loss_plot = self._create_loss_plot(training_history)
         if loss_plot:
             report["loss_plot"] = loss_plot
         return report
     
-    def _create_loss_plot(self, training_history, validation_history):
-        """Create loss curve visualization for both training and validation."""
-        if not training_history or not validation_history:
+    def _create_loss_plot(self, training_history):
+        """Create loss curve visualization for training only."""
+        if not training_history:
             return None
 
         try:
@@ -583,7 +420,7 @@ class CModelTrainer:
             plt.plot(epochs, train_losses, 'o-', label='Training Loss', alpha=0.8)
             plt.xlabel('Epoch')
             plt.ylabel('Loss')
-            plt.title(f'Train vs. Validation Loss - {self.dataset_type.upper()} Dataset')
+            plt.title(f'Training Loss - {self.dataset_type.upper()} Dataset (No Validation)')
             plt.legend()
             plt.grid(True, alpha=0.3)
 
@@ -600,35 +437,33 @@ class CModelTrainer:
     
     def run_training(self, model, dataset_info=None):
         """
-        Main training loop with validation and model saving.
+        Main training loop (training only) with model saving.
         Args:
             model: PyTorch model to train
             dataset_info: Optional dataset info from CDataProcessor (for SDF datasets)
         Returns:
             tuple: (trained_model, training_report)
         """
-        print(f"Starting training on {self.device}")
+        print(f"    ✓ Starting training on {self.device}")
         model = model.to(self.device)
-        # Create datasets and data loaders
+        # Create dataset and data loader
         try:
-            train_dataset, val_dataset = self.create_datasets(dataset_info)
-            train_loader, val_loader = self.create_data_loaders(train_dataset, val_dataset)
+            train_dataset = self.create_datasets(dataset_info)
+            train_loader = self.create_data_loaders(train_dataset)
+            # Report total sampled points (raw) used for training
+            if hasattr(train_dataset, 'total_points'):
+                print(f"    ✓ Training point samples (raw): {train_dataset.total_points} (avg {train_dataset.avg_points:.1f} per mesh, {len(train_dataset.files)} meshes)")
         except Exception as e:
             print(f"Error loading datasets: {e}")
             return model, {"error": f"Dataset loading failed: {e}"}
         # Setup loss function and optimizer
-        if self.dataset_type == 'sdf':
-            criterion = self._get_sdf_loss()
-            if hasattr(train_dataset, 'latent_vectors'):
-                latent_vectors = train_dataset.latent_vectors.to(self.device)
-                optimizer = self._get_optimizer(model, latent_vectors)
-                print(f"✓ SDF training setup complete with dual learning rates")
-            else:
-                print("⚠️  No latent vectors found in SDF dataset, using single learning rate")
-                optimizer = self._get_optimizer(model)
-                latent_vectors = None
+        criterion = self._get_sdf_loss()
+        if hasattr(train_dataset, 'latent_vectors'):
+            latent_vectors = train_dataset.latent_vectors.to(self.device)
+            optimizer = self._get_optimizer(model, latent_vectors)  
+            print(f"    ✓ SDF training setup complete with dual learning rates\n")
         else:
-            criterion = nn.MSELoss() if self.loss_function.lower() == 'mse' else nn.L1Loss()
+            print(" No latent vectors found in SDF dataset, using single learning rate")
             optimizer = self._get_optimizer(model)
             latent_vectors = None
             
@@ -657,40 +492,30 @@ class CModelTrainer:
         import json
         with open(config_path, 'w') as f:
             json.dump(initial_config, f, indent=2)
-        print(f"Training run directory: {run_dir}\n")
 
         total_start_time = time.time()
         training_history, best_model_state, best_optimizer_state, best_latent_state, best_epoch = self.train(
             model, train_loader, criterion, optimizer, latent_vectors, dataset_info
         )
-
         best_train_loss = min([h['train_loss'] for h in training_history]) if training_history else None
         total_training_time = time.time() - total_start_time
-        
+
         if best_model_state is not None:
-            print(f"\n Restoring best model state from epoch {best_epoch}...")
             model.load_state_dict(best_model_state)
             if best_optimizer_state is not None:
                 optimizer.load_state_dict(best_optimizer_state)
-                print(f"✓ Optimizer state restored")
+                print(f"\n    ✓ Optimizer state restored")
             if best_latent_state is not None and latent_vectors is not None:
                 latent_vectors.data = best_latent_state.to(latent_vectors.device)
-                print(f"✓ Latent vectors restored")
-            print(f"✓ Best model restored from epoch {best_epoch}")
-            # Always overwrite best_model.pth in models/
+                print(f"    ✓ Latent vectors restored")
+                
+            print(f"    ✓ Best model restored from epoch {best_epoch}")
             best_model_path = os.path.join(model_dir, 'best_model.pth')
-            # Find best train loss and val loss for this epoch
             best_train_loss_val = None
-            best_val_loss_val = None
             if training_history:
                 for h in training_history:
                     if h['epoch'] == best_epoch:
                         best_train_loss_val = h['train_loss']
-                        break
-            if validation_history := locals().get('validation_history', None):
-                for v in validation_history:
-                    if v.get('epoch', None) == best_epoch:
-                        best_val_loss_val = v['val_loss']
                         break
             torch.save({
                 'epoch': best_epoch,
@@ -700,15 +525,11 @@ class CModelTrainer:
                 'config': self.config,
                 'dataset_type': self.dataset_type,
                 'train_loss': best_train_loss_val,
-                'val_loss': best_val_loss_val,
                 'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
             }, best_model_path)
 
-        # Always save latest checkpoint to checkpoints/ (after training loop, not per-epoch)
         latest_checkpoint_path = os.path.join(checkpoint_dir, 'latest_checkpoint.pth')
-        # Use last epoch's train/val loss for latest checkpoint
         last_train_loss = training_history[-1]['train_loss'] if training_history else None
-        last_val_loss = validation_history[-1]['val_loss'] if validation_history and 'val_loss' in validation_history[-1] else None
         torch.save({
             'epoch': best_epoch,
             'model_state_dict': model.state_dict(),
@@ -717,24 +538,15 @@ class CModelTrainer:
             'config': self.config,
             'dataset_type': self.dataset_type,
             'train_loss': last_train_loss,
-            'val_loss': last_val_loss,
             'timestamp': time.strftime('%Y-%m-%d_%H-%M-%S')
         }, latest_checkpoint_path)
-
-        validation_history, val_latents = self.validate(
-            model, val_loader, latent_vectors.shape[1] if latent_vectors is not None else 256, self.device
-        )
-
-        best_val_loss = min([h['val_loss'] for h in validation_history]) if validation_history and 'val_loss' in validation_history[0] else None
 
         final_model_data = {
             'epoch': best_epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'best_train_loss': best_train_loss,
-            'best_val_loss': best_val_loss,
             'training_history': training_history,
-            'validation_history': validation_history,
             'config': self.config,
             'dataset_type': self.dataset_type,
             'model_parameters': sum(p.numel() for p in model.parameters()),
@@ -749,15 +561,12 @@ class CModelTrainer:
         final_path = os.path.join(model_dir, 'final_model_complete.pth')
         torch.save(final_model_data, final_path)
 
-        # Save training summary to metrics/
         training_summary = {
             'experiment_id': self.experiment_id,
             'total_training_time': total_training_time,
             'best_epoch': best_epoch,
             'best_train_loss': best_train_loss,
-            'best_val_loss': best_val_loss,
             'final_train_loss': training_history[-1]['train_loss'] if training_history else None,
-            'final_val_loss': validation_history[-1]['val_loss'] if validation_history else None,
             'total_epochs': len(training_history),
             'model_parameters': sum(p.numel() for p in model.parameters()),
             'run_directory': run_dir,
@@ -774,13 +583,12 @@ class CModelTrainer:
         with open(summary_path, 'w') as f:
             json.dump(training_summary, f, indent=2)
 
-        report = self._create_report(training_history, validation_history, best_train_loss, best_val_loss)
+        report = self._create_report(training_history, best_train_loss)
         report['run_directory'] = run_dir
         report['experiment_id'] = self.experiment_id
         report['model_saved'] = True
         report['best_epoch'] = best_epoch
         report['total_training_time'] = total_training_time
-        report['optimized_val_latents'] = [v.numpy().tolist() for v in val_latents]
         report['training_artifacts'] = {
             'best_model_path': os.path.join(model_dir, 'best_model.pth'),
             'final_model_path': os.path.join(model_dir, 'final_model_complete.pth'),
@@ -788,9 +596,4 @@ class CModelTrainer:
             'training_summary_path': summary_path,
             'run_directory': run_dir
         }
-        print(f"\nTraining artifacts saved to: {run_dir}")
-        print(f"   Models: {model_dir}")
-        print(f"   Checkpoints: {checkpoint_dir}")
-        print(f"   Configs: {config_dir}")
-        print(f"   Metrics: {metrics_dir}")
         return model, report

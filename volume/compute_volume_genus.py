@@ -13,7 +13,7 @@ import yaml
 
 from volume.sdfs import SDF_interpolator, sdf_sphere, sdf_torus, sdf_2_torus
 from volume.config import DEV, VOLUME_DIR, COORDS_FIRST, LATENT_FIRST, LATENT_DIM, LATENT_VEC_MAX
-from src.CArchitectureManager import CArchitectureManager
+from deepsdf.Model import DeepSDF
 
 def generate_mesh_from_sdf(sdf, coords, grid_size):
     vertices, faces, e2v = igl.marching_cubes(
@@ -100,7 +100,7 @@ def compute_volume(vertices, faces):
         
     return volume
 
-def match_volume(vertices, faces, target_volume=10):
+def match_volume(vertices, faces, target_volume=20):
     volume = compute_volume(vertices, faces)
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
@@ -225,8 +225,8 @@ if __name__ == "__main__":
 
     best_model_path = r"C:\Users\singh\OneDrive\Documents\GitHub\topology-control\volume\trained_deepsdfs\best_model.pth"
 
-    arch_manager = CArchitectureManager(config['model_config'])
-    model = arch_manager.get_model().to(DEV)
+    # Instantiate DeepSDF model directly (architecture manager removed)
+    model = DeepSDF(config.get('model_config', {})).to(DEV)
     ckpt = torch.load(best_model_path, map_location=DEV)
     model.load_state_dict(ckpt['model_state_dict'])
 

@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from volume.config import LAYER_SIZE
 
-
 class Latent2Volume(nn.Module):
     """
     A simple regressor model

@@ -45,7 +45,7 @@ def train_and_save(loader, model, crit, opt, name):
 if __name__ == "__main__":
 
         
-    dataset = GeneraDataset(
+    '''dataset = GeneraDataset(
         dataset_path=os.path.join(VOLUME_DIR, "data", "2d_latents_volumes.npz")
     )
 
@@ -65,4 +65,10 @@ if __name__ == "__main__":
     opt = optim.Adam(list(model.parameters()), lr=LR)
     loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=dataset.collate_fn)
 
-    train_and_save(loader, model, crit, opt, "volume")
+    train_and_save(loader, model, crit, opt, "volume")'''
+    import numpy as np
+    data = np.load("/Users/marina.levay/Documents/GitHub/topology-control/volume/data/2d_latents_volumes.npz")
+    print(data.files)  # Shows all keys
+    print(data["latents"].shape)  # Example: shape of latent vectors
+    print(data["volumes"].shape)  # Example: shape of volumes
+    print(data["genera"].shape)   # Example: shape of genera

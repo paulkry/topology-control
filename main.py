@@ -1,4 +1,4 @@
-from src.CPipelineOrchestrator import CPipelineOrchestrator
+from deepsdf.PipelineOrchestrator import PipelineOrchestrator
 
 # Run the pipeline
-CPipelineOrchestrator().run()
+PipelineOrchestrator().run()
