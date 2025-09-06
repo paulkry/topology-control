@@ -15,14 +15,20 @@ from deepsdf.Model import DeepSDF
 torch.set_default_dtype(torch.float32)
 
 class SDFDataset(Dataset):
-    """SDF dataset backed by pre-generated point clouds + SDF arrays (train only)."""
-    def __init__(self, dataset_info, split='train', fix_seed=False):
-        """Initialize dataset.
-
-        Args:
-            dataset_info (dict): Structure containing '*_files' lists with point & distance npy paths
-            split (str): Dataset split ('train')
-            fix_seed (bool): Reproducibility flag
+    """
+    SDF Dataset class that uses preprocessed data from CDataProcessor.
+    Compatible with DeepSDF training pipeline - supports latent code learning.
+    """
+    
+    def __init__(self, dataset_info, split='train', fix_seed=False, volume_coords=None):
+        """
+        Initialize dataset from CDataProcessor output.
+        
+        Parameters:
+            dataset_info (dict): Output from CDataProcessor.generate_sdf_dataset()
+            split (str): 'train' or 'val'
+            fix_seed (bool): Whether to fix random seed for reproducibility
+            volume_coords (torch.Tensor): Volume coordinates for additional sampling
         """
         self.split = split
         self.fix_seed = fix_seed
@@ -39,20 +45,9 @@ class SDFDataset(Dataset):
         self.latent_vectors = torch.randn(len(self.files), z_dim)
         self.latent_vectors = (self.latent_vectors * latent_sd) + latent_mean
         self.latent_vectors.requires_grad = True
-
-        # Pre-compute point counts for logging ( number of sampled points per mesh )
-        self.point_counts = []
-        total = 0
-        for f in self.files:
-            try:
-                pts = np.load(f['points_file'], mmap_mode='r')  # lightweight header read
-                n = pts.shape[0]
-            except Exception:
-                n = 0
-            self.point_counts.append(n)
-            total += n
-        self.total_points = int(total)
-        self.avg_points = float(total / len(self.files)) if self.files else 0.0
+        
+        # Store volume coordinates for additional sampling if needed
+        self.volume_coords = volume_coords or dataset_info.get('volume_coords')
     
     def __getitem__(self, idx):
         if self.fix_seed:
@@ -62,7 +57,7 @@ class SDFDataset(Dataset):
         file_info = self.files[idx]
         sampled_points = np.load(file_info['points_file'])
         sdf_values = np.load(file_info['distances_file'])
-                
+        
         # Convert to tensors
         sampled_points = torch.tensor(sampled_points, dtype=torch.float32)
         sdf_values = torch.tensor(sdf_values, dtype=torch.float32)

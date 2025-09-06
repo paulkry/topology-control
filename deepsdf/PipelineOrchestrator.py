@@ -130,7 +130,7 @@ class PipelineOrchestrator:
         if self.pointcloud_processor is None:
             self.pointcloud_processor = PointCloudProcessor(
                 data_dir=train_dir,
-                target_volume=processor_config.get('point_cloud_params', {}).get('target_volume', 20)
+                target_volume=processor_config.get('point_cloud_params', {}).get('target_volume', 6)
             )
 
         # Discover mesh files

@@ -7,40 +7,29 @@ import igl
 from volume.compute_volume_genus import match_volume, compute_volume
 
 class PointCloudProcessor:
-    """Point cloud generator enforcing a common target volume (strict) and centering.
-
-    Bbox is NOT forced; shapes keep proportional extents. Guarantees volume match within tolerance or raises.
-    """
-
-    def __init__(self, data_dir="data", target_volume=20, volume_tolerance=5e-3):
+    """Pipeline for generating point clouds from meshes"""
+    
+    def __init__(self, data_dir="data", target_volume=6):
         self.data_dir = data_dir
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
         self.target_volume = target_volume
-        self.volume_tolerance = volume_tolerance  
-
+    
     def load_mesh(self, mesh_file):
+        """Load, normalize, and rescale mesh to target volume"""
         mesh = meshio.read(mesh_file)
         vertices = mesh.points.copy()
         faces = mesh.cells[0].data
-        orig_vol = compute_volume(vertices, faces)
+        # Rescale mesh to target volume
         vertices, faces = match_volume(vertices, faces, self.target_volume)
+        # Rescale vertices to fit in the -1 to 1 cube
+        vertices -= np.mean(vertices, axis=0)	
+        vertices /= np.max(np.abs(vertices))
         
-        # center mesh in unit cube (preserves volume)
-        vertices -= np.mean(vertices, axis=0)
-        new_vol = compute_volume(vertices, faces)
-        rel_err = abs(new_vol - self.target_volume) / self.target_volume
-        
-        status = "PASS" if rel_err <= self.volume_tolerance else "WARN"
-        print(f"    [Volume] {Path(mesh_file).name}: initial={orig_vol:.4f} final={new_vol:.4f} target={self.target_volume:.4f} rel_err={rel_err:.2%} status={status}")
-        if status == "WARN":
-            print(f"    [Volume][WARN] Relative error {rel_err:.2%} > tolerance {self.volume_tolerance:.2%}. Consider lowering tolerance or refining scale.")
-        
-        self.last_scale_info = {"method": "match_volume", "orig_volume": orig_vol, "new_volume": new_vol, "rel_err": rel_err, "tolerance": self.volume_tolerance}
-        
-        return vertices, faces, Path(mesh_file).stem
+        name = Path(mesh_file).stem
+        return vertices, faces, name
     
-    def sample_points(self, vertices, faces, radius=0.02, sigma=0.02, mu=0.0, n_gaussian=10, n_uniform=1000):
+    def sample_points(self, vertices, faces, radius=0.02, sigma=0.0, mu=0.0, n_gaussian=10, n_uniform=1000):
         """ 
         Sample points using different strategies
         Input: 
@@ -61,15 +50,19 @@ class PointCloudProcessor:
         surface_points = igl.blue_noise(vertices, faces, radius)[2]
         # Concatenate surface points with random points
         sampled_points = np.concatenate((random_points, surface_points), axis=0)
-        # Add Gaussian noise if needed
+        
+                # Add Gaussian noise if needed
         if n_gaussian > 0 and sigma > 0:
             noise = np.random.normal(mu, sigma, (n_gaussian * surface_points.shape[0], 3))
+            # Tile surface points to match noise shape
             tiled_surface = np.tile(surface_points, (n_gaussian, 1))
             gaussian_points = tiled_surface + noise
+            
             sampled_points = np.concatenate((sampled_points, gaussian_points), axis=0)
+
         return sampled_points
 
-    def generate_point_cloud(self, meshes, radius=0.02, sigma=0.02, mu=0.0, n_gaussian=10, n_uniform=1000):
+    def generate_point_cloud(self, meshes, radius=0.02, sigma=0.0, mu=0.0, n_gaussian=10, n_uniform=1000):
         """
         Generate point clouds from meshes
             Input:
@@ -105,3 +98,24 @@ class PointCloudProcessor:
                 # Save data
                 np.save(points_file, sampled_points)
                 np.save(distances_file, distances)
+    
+    def get_dataset_stats(self, mesh_name):
+        """Get statistics about generated dataset"""
+        points_file = f"{self.data_dir}/{mesh_name}_sampled_points.npy"
+        distances_file = f"{self.data_dir}/{mesh_name}_signed_distances.npy"
+        
+        if os.path.exists(points_file) and os.path.exists(distances_file):
+            points = np.load(points_file)
+            distances = np.load(distances_file)
+            
+            print(f"Dataset stats for {mesh_name}:")
+            print(f"  Total points: {len(points)}")
+            print(f"  SDF range: [{distances.min():.4f}, {distances.max():.4f}]")
+            print(f"  Inside surface (SDF < 0): {(distances < 0).sum()}")
+            print(f"  Outside surface (SDF > 0): {(distances > 0).sum()}")
+            print(f"  Near surface (|SDF| < 0.01): {(np.abs(distances) < 0.01).sum()}")
+            
+            return {'points': points, 'distances': distances}
+        else:
+            print(f"No dataset found for {mesh_name}")
+            return None

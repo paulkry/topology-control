@@ -13,13 +13,14 @@ from torch.utils.data import DataLoader
 from volume.train import train_and_save
 from volume.config import BATCH_SIZE, LR, DEV as CONFIG_DEV  # reuse existing config constants
 
+best_model_path = r"/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250830_151815/training_artifacts/run_20250830_151821/models/best_model.pth"
+
 # Get the best model from training
 with open('config/config_examples.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
-# Updated: device and resolution now live under trainer_config (see config_examples.yaml)
 trainer_cfg = config.get('trainer_config', {})
-# Prefer run-time override from config_examples.yaml but fall back to volume.config DEV
+
 DEV = trainer_cfg.get('device', CONFIG_DEV)
 RESOLUTION = trainer_cfg.get('resolution', 100)
 LATENT_DIM = config['model_config']['z_dim']
@@ -28,8 +29,6 @@ print("Layer Size:", LAYER_SIZE)
 print("Device:", DEV)
 print("Latent dim:", LATENT_DIM)
 print("Grid resolution:", RESOLUTION)
-
-best_model_path = r"/Users/marina.levay/Documents/GitHub/topology-control/artifacts/experiment_20250818_112302/training_artifacts/run_20250818_112334/models/best_model.pth"
 
 model = DeepSDF(config['model_config']).to(DEV)
 ckpt = torch.load(best_model_path, map_location=DEV)
