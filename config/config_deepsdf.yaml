@@ -1,0 +1,49 @@
+home: &home_path /Users/marina.levay/Documents/GitHub/topology-control/ # all other paths are relative to home
+
+artifacts_config:
+  save_artifacts_to: artifacts
+
+processor_config:
+  skip_processing: false
+  dataset_paths:
+    raw: &raw_data_path data/raw
+    processed: &processed_data_path data/processed
+
+  point_cloud_params:  
+    radius: 0.02
+    sigma: 0.02
+    mu: 0.0
+    n_gaussian: 5      # number of Gaussian clusters
+    n_uniform: 1000    # number of uniform samples
+    target_volume: 6  # passed to PointCloudProcessor
+
+model_config:
+  skip_building: false          # If true, model construction step is skipped
+  model_name: deepsdf
+  z_dim: 4
+  layer_size: 64
+  coord_dim: 3
+
+trainer_config:
+  skip_training: false
+  processed_data_path: *processed_data_path   # Used when running standalone
+  optimizer: adam
+  network_learning_rate: 0.0001
+  latent_learning_rate: 0.001
+  batch_size: 16
+  num_epochs: 10000
+  max_points: 30000              # Max points per mesh considered (not strictly enforced in current loader)
+
+  # DeepSDF training hyperparameters (used in Trainer._get_sdf_loss & dataset_info construction)
+  sdf_delta: 1.0
+  latent_sd: 0.01
+  latent_mean: 0.0
+
+  # Device / resolution (migrated from former volume_processor_params)
+  device: cpu           # training device preference (currently informational)
+  resolution: 100        # kept for downstream components needing grid resolution
+
+  # Model saving behavior (handled inside ModelTrainer.run_training + ArtifactManager)
+  save_model: true
+  save_best_only: true           # Currently best model logic always applied; kept for forward compatibility
+  save_frequency: 20             # (Not actively used in simplified trainer loop)
