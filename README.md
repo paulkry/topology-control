@@ -1,7 +1,7 @@
 # Topology Control
 MIT SGI 2025 topology control project.
 
-A modular, config-driven ML pipeline for 3D shape classification using PyTorch. Features auto-discovery of mesh files, configurable train/val splitting, and comprehensive artifact management.  Please see [part 1](https://summergeometry.org/sgi2025/topology-control-training-a-deepsdf-1-2/) and [part 2](https://summergeometry.org/sgi2025/topology-control-pathfinding-for-genus-preservation-2-2/) of our blog posts for details.  
+A modular, config-driven ML pipeline for 3D shape classification using PyTorch. Features auto-discovery of mesh files, configurable train/val splitting, and comprehensive artifact management.  Please see [part 1](https://summergeometry.org/sgi2025/topology-control-training-a-deepsdf-1-2/) and [part 2](https://summergeometry.org/sgi2025/topology-control-pathfinding-for-genus-preservation-2-2/) of our article on the [SGI 2025 Blog](https://summergeometry.org/sgi2025/) for details.  
 
 ## Features
 
